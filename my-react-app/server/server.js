@@ -28,13 +28,9 @@ app.use(session({
     }
 }));
 
-// Replace the CORS configuration with this
+// Update CORS configuration for local development
 app.use(cors({
-    origin: [
-        'http://localhost:3000',
-        'https://kupo-nuts-svi8.vercel.app', // Add your Vercel domain here
-        process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null
-    ].filter(Boolean),
+    origin: ['http://localhost:3000', 'https://kupo-nuts-svi8.vercel.app'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
