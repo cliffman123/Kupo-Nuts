@@ -9,5 +9,23 @@
         "installCommand": "npm install --legacy-peer-deps"
       }
     }
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/my-react-app/build/static/$1"
+    },
+    {
+      "src": "/assets/(.*)",
+      "dest": "/my-react-app/build/assets/$1"
+    },
+    {
+      "src": "/favicon.ico",
+      "dest": "/my-react-app/build/favicon.ico"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/my-react-app/build/index.html"
+    }
   ]
 }
