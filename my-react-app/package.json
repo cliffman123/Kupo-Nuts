@@ -10,7 +10,7 @@
     "serve": "serve -s build",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d build",
-    "vercel-build": "npm install && npm run build"
+    "vercel-build": "npm install --legacy-peer-deps && npm run build"
   },
   "dependencies": {
     "@craco/craco": "^7.1.0",
@@ -33,7 +33,6 @@
     "https-browserify": "^1.0.0",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.475.0",
-    "masonry-layout": "^4.2.2",
     "process": "^0.11.10",
     "puppeteer": "^23.11.1",
     "puppeteer-core": "^23.11.1",
@@ -42,7 +41,6 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-lazyload": "^3.2.1",
-    "react-masonry-component": "^6.3.0",
     "react-masonry-css": "^1.0.16",
     "react-scripts": "5.0.1",
     "react-virtualized": "^9.22.6",
