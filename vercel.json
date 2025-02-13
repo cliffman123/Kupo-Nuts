@@ -1,31 +1,23 @@
 {
   "version": 2,
-  "builds": [
+  "buildCommand": "cd my-react-app && npm install --legacy-peer-deps && npm run build",
+  "outputDirectory": "my-react-app/build",
+  "framework": "create-react-app",
+  "rewrites": [
     {
-      "src": "my-react-app/package.json",
-      "use": "@vercel/static-build",
-      "config": {
-        "distDir": "build",
-        "installCommand": "npm install --legacy-peer-deps"
-      }
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ],
-  "routes": [
+  "headers": [
     {
-      "src": "/static/(.*)",
-      "dest": "/my-react-app/build/static/$1"
-    },
-    {
-      "src": "/assets/(.*)",
-      "dest": "/my-react-app/build/assets/$1"
-    },
-    {
-      "src": "/favicon.ico",
-      "dest": "/my-react-app/build/favicon.ico"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/my-react-app/build/index.html"
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "s-maxage=1, stale-while-revalidate"
+        }
+      ]
     }
   ]
 }
