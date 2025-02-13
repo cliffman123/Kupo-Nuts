@@ -30,7 +30,11 @@ app.use(session({
 
 // Replace the CORS configuration with this
 app.use(cors({
-    origin: ['http://localhost:3000', 'https://your-app-name.vercel.app'],
+    origin: [
+        'http://localhost:3000',
+        'https://kupo-nuts-svi8.vercel.app', // Add your Vercel domain here
+        process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null
+    ].filter(Boolean),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
