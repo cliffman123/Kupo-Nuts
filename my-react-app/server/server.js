@@ -23,14 +23,14 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === 'production',
+        secure: false, // Set to false for HTTP in development
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
 
-// Update CORS configuration for local development
+// Update CORS configuration
 app.use(cors({
-    origin: ['http://localhost:3000', 'https://kupo-nuts-svi8.vercel.app'],
+    origin: ['http://localhost:3000', 'https://kupo-nuts-svi8.vercel.app/', 'https://kupo-nuts.vercel.app'], // Add your Vercel domain
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
@@ -39,7 +39,12 @@ app.use(cors({
 // Add these headers to every response
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    if (origin && [
+        'https://kupo-nuts-svi8.vercel.app',
+        'https://kupo-nuts.vercel.app'
+    ].includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    }
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
     res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
@@ -216,7 +221,7 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             httpOnly: true,
             secure: false, // Set to false for development
             sameSite: 'lax',
-            path: '/',
+            path: '/',,
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         });
 
