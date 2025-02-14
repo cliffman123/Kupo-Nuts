@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: media-gallery-backend
+    name: kupo-nuts-server
     env: node
     buildCommand: npm install
     startCommand: node server.js

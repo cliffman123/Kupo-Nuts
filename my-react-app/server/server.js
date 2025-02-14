@@ -30,24 +30,29 @@ app.use(session({
 
 // Update CORS configuration
 app.use(cors({
-    origin: ['http://localhost:3000', 'https://kupo-nuts-svi8.vercel.app/', 'https://kupo-nuts.vercel.app'], // Add your Vercel domain
+    origin: [
+        'https://kupo-nuts-svi8.vercel.app', 
+        'https://kupo-nuts.vercel.app',
+        process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : null
+    ].filter(Boolean),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
 }));
 
-// Add these headers to every response
+// Simplify headers middleware
 app.use((req, res, next) => {
     const origin = req.headers.origin;
-    if (origin && [
-        'https://kupo-nuts-svi8.vercel.app',
-        'https://kupo-nuts.vercel.app'
-    ].includes(origin)) {
+    // Allow ngrok domains
+    if (origin && (
+        ['https://kupo-nuts-svi8.vercel.app', 'https://kupo-nuts.vercel.app'].includes(origin) ||
+        origin.match(/\.ngrok\.io$/)
+    )) {
         res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
+        res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     }
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-    res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     next();
 });
 
@@ -216,12 +221,12 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        // Set token in cookie
+        // Set token in cookie with updated settings
         res.cookie('token', token, {
             httpOnly: true,
-            secure: false, // Set to false for development
-            sameSite: 'lax',
-            path: '/',  // Removed extra comma here
+            secure: true, // Set to true since Vercel uses HTTPS
+            sameSite: 'none', // Required for cross-site cookies
+            path: '/',
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         });
 
