@@ -221,7 +221,7 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             httpOnly: true,
             secure: false, // Set to false for development
             sameSite: 'lax',
-            path: '/',,
+            path: '/',  // Removed extra comma here
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         });
 
