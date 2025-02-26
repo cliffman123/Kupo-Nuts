@@ -294,6 +294,13 @@ const VideoList = () => {
         }
     };
 
+    const scrollToMedia = useCallback((index) => {
+        const mediaElement = mediaRefs.current[index];
+        if (mediaElement) {
+            mediaElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }, []);
+
     const handleMediaClick = (index) => {
         if (!isClickable) return; // Prevent clicking if in cooldown
         setFullscreenMedia(index);
@@ -308,6 +315,7 @@ const VideoList = () => {
             button.style.zIndex = '1002';
         });
         document.querySelector('.profile-button').style.display = 'none';
+        scrollToMedia(index);
     };
 
     const handleMediaClose = () => {
@@ -336,6 +344,58 @@ const VideoList = () => {
             handleMediaClose();
         }
     };
+
+    const handleKeyPress = useCallback((e) => {
+        if (fullscreenMedia === null) return;
+
+        if (e.key === 'ArrowDown') {
+            const nextIndex = (fullscreenMedia + 1) % mediaUrls.length;
+            setFullscreenMedia(nextIndex);
+            const nextMedia = mediaRefs.current[nextIndex];
+            if (nextMedia && nextMedia.tagName === 'VIDEO') {
+                nextMedia.play().catch(() => {});
+            }
+            scrollToMedia(nextIndex);
+        } else if (e.key === 'ArrowUp') {
+            const prevIndex = (fullscreenMedia - 1 + mediaUrls.length) % mediaUrls.length;
+            setFullscreenMedia(prevIndex);
+            const prevMedia = mediaRefs.current[prevIndex];
+            if (prevMedia && prevMedia.tagName === 'VIDEO') {
+                prevMedia.play().catch(() => {});
+            }
+            scrollToMedia(prevIndex);
+        }
+    }, [fullscreenMedia, mediaUrls.length, scrollToMedia]);
+
+    const handleWheel = useCallback((e) => {
+        if (fullscreenMedia === null) return;
+
+        // Get the scrollable element
+        const element = e.target;
+        const isAtBottom = Math.abs(element.scrollHeight - element.scrollTop - element.clientHeight) < 1;
+        const isAtTop = element.scrollTop === 0;
+
+        // Only handle wheel events when at boundaries
+        if (isAtBottom && e.deltaY > 0) {
+            e.preventDefault();
+            const nextIndex = (fullscreenMedia + 1) % mediaUrls.length;
+            setFullscreenMedia(nextIndex);
+            const nextMedia = mediaRefs.current[nextIndex];
+            if (nextMedia && nextMedia.tagName === 'VIDEO') {
+                nextMedia.play().catch(() => {});
+            }
+            scrollToMedia(nextIndex);
+        } else if (isAtTop && e.deltaY < 0) {
+            e.preventDefault();
+            const prevIndex = (fullscreenMedia - 1 + mediaUrls.length) % mediaUrls.length;
+            setFullscreenMedia(prevIndex);
+            const prevMedia = mediaRefs.current[prevIndex];
+            if (prevMedia && prevMedia.tagName === 'VIDEO') {
+                prevMedia.play().catch(() => {});
+            }
+            scrollToMedia(prevIndex);
+        }
+    }, [fullscreenMedia, mediaUrls.length, scrollToMedia]);
 
     const lastMediaElementRef = useCallback(node => {
         if (!node) return;
@@ -371,12 +431,16 @@ const VideoList = () => {
 
     useEffect(() => {
         document.addEventListener('mousedown', handleClickOutside);
+        document.addEventListener('keydown', handleKeyPress);
+        document.addEventListener('wheel', handleWheel, { passive: false });
         document.body.style.overflow = fullscreenMedia !== null ? 'hidden' : 'auto';
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleKeyPress);
+            document.removeEventListener('wheel', handleWheel);
             document.body.style.overflow = 'auto';
         };
-    }, [fullscreenMedia]);
+    }, [fullscreenMedia, handleKeyPress, handleWheel]);
 
     useEffect(() => {
         if (autoScroll && fullscreenMedia !== null) {
@@ -432,15 +496,47 @@ const VideoList = () => {
         500: 1
     }), []);
 
-    const handleImageError = (e) => {
+    const handleImageError = (e, link, index) => {
         console.error('Image failed to load:', e);
         e.target.style.display = 'none'; // Hide the broken image
+        
+        // If in fullscreen and all media in this item failed to display, move to next
+        if (fullscreenMedia === index) {
+            const mediaItem = mediaUrls[index];
+            const allMediaFailed = mediaItem[1].every(mediaLink => {
+                const mediaElement = Array.from(document.querySelectorAll(`img[src="${mediaLink}"], video[src="${mediaLink}"]`));
+                return mediaElement.every(el => el.style.display === 'none');
+            });
+            
+            if (allMediaFailed) {
+                const nextIndex = (index + 1) % mediaUrls.length;
+                setFullscreenMedia(nextIndex);
+                const nextMedia = mediaRefs.current[nextIndex];
+                if (nextMedia && nextMedia.tagName === 'VIDEO') {
+                    nextMedia.play().catch(() => {});
+                }
+            }
+        }
     };
 
     const handleVideoError = async (e) => {
         console.error('Video failed to load:', e);
         if (e.target.error.code === 4) { // 404 error
             e.target.style.display = 'none'; // Hide the broken video
+            
+            // Get the index from the video element's reference in mediaRefs
+            const index = Object.keys(mediaRefs.current).find(key => 
+                mediaRefs.current[key] === e.target
+            );
+            
+            if (fullscreenMedia === Number(index)) {
+                const nextIndex = (Number(index) + 1) % mediaUrls.length;
+                setFullscreenMedia(nextIndex);
+                const nextMedia = mediaRefs.current[nextIndex];
+                if (nextMedia && nextMedia.tagName === 'VIDEO') {
+                    nextMedia.play().catch(() => {});
+                }
+            }
         }
     };
 

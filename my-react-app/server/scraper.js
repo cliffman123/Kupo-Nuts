@@ -46,7 +46,7 @@ const scrapeVideos = async (providedLink = null, page = null, username = null) =
         
         if (!page) {
             browser = await puppeteer.launch({
-                headless: providedLink ? false : false,
+                headless: providedLink ? true : true,
                 args: [
                     `--disable-extensions-except=${uBlockPath}`,
                     `--load-extension=${uBlockPath}`
