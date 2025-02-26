@@ -367,36 +367,6 @@ const VideoList = () => {
         }
     }, [fullscreenMedia, mediaUrls.length, scrollToMedia]);
 
-    const handleWheel = useCallback((e) => {
-        if (fullscreenMedia === null) return;
-
-        // Get the scrollable element
-        const element = e.target;
-        const isAtBottom = Math.abs(element.scrollHeight - element.scrollTop - element.clientHeight) < 1;
-        const isAtTop = element.scrollTop === 0;
-
-        // Only handle wheel events when at boundaries
-        if (isAtBottom && e.deltaY > 0) {
-            e.preventDefault();
-            const nextIndex = (fullscreenMedia + 1) % mediaUrls.length;
-            setFullscreenMedia(nextIndex);
-            const nextMedia = mediaRefs.current[nextIndex];
-            if (nextMedia && nextMedia.tagName === 'VIDEO') {
-                nextMedia.play().catch(() => {});
-            }
-            scrollToMedia(nextIndex);
-        } else if (isAtTop && e.deltaY < 0) {
-            e.preventDefault();
-            const prevIndex = (fullscreenMedia - 1 + mediaUrls.length) % mediaUrls.length;
-            setFullscreenMedia(prevIndex);
-            const prevMedia = mediaRefs.current[prevIndex];
-            if (prevMedia && prevMedia.tagName === 'VIDEO') {
-                prevMedia.play().catch(() => {});
-            }
-            scrollToMedia(prevIndex);
-        }
-    }, [fullscreenMedia, mediaUrls.length, scrollToMedia]);
-
     const lastMediaElementRef = useCallback(node => {
         if (!node) return;
         
@@ -432,15 +402,13 @@ const VideoList = () => {
     useEffect(() => {
         document.addEventListener('mousedown', handleClickOutside);
         document.addEventListener('keydown', handleKeyPress);
-        document.addEventListener('wheel', handleWheel, { passive: false });
         document.body.style.overflow = fullscreenMedia !== null ? 'hidden' : 'auto';
         return () => {
             document.removeEventListener('mousedown', handleClickOutside);
             document.removeEventListener('keydown', handleKeyPress);
-            document.removeEventListener('wheel', handleWheel);
             document.body.style.overflow = 'auto';
         };
-    }, [fullscreenMedia, handleKeyPress, handleWheel]);
+    }, [fullscreenMedia, handleKeyPress]);
 
     useEffect(() => {
         if (autoScroll && fullscreenMedia !== null) {
@@ -854,10 +822,6 @@ const VideoList = () => {
         event.target.value = '';
     };
 
-    const handleMediaLoad = (e) => {
-        e.target.classList.add('visible');
-    };
-
     return (
         <div>
             {notification && (
@@ -904,9 +868,7 @@ const VideoList = () => {
                                             controls
                                             muted={fullscreenMedia !== index}
                                             loop
-                                            className="fade-in"
-                                            onLoadedData={handleMediaLoad}
-                                            onError={(e) => handleVideoError(e)}
+                                            onError={(e) => handleVideoError(e, firstVideoLink)}
                                             onLoadStart={() => {
                                                 setCookies();
                                             }}
@@ -916,20 +878,19 @@ const VideoList = () => {
                                             ref={el => mediaRefs.current[index] = el}
                                             src={firstVideoLink}
                                             alt="Media"
-                                            className="fade-in"
-                                            onLoad={handleMediaLoad}
                                             onError={(e) => handleImageError(e, firstVideoLink, index)}
                                         />
                                     )}
                                     {fullscreenMedia === index && videoLinks.slice(1).map((link, i) => (
                                         <div key={i} className="fullscreen-media-container">
-                                            <img 
-                                                className='fullscreen-media fade-in'
+                                            <img className='fullscreen-media'
                                                 ref={el => mediaRefs.current[`${index}_${i}`] = el}
                                                 src={link}
                                                 alt="Media"
-                                                onLoad={handleMediaLoad}
                                                 onError={(e) => handleImageError(e, link, index)}
+                                                onLoad={() => {
+                                                    setCookies();
+                                                }}
                                             />
                                         </div>
                                     ))}

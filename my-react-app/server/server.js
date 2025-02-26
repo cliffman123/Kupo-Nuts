@@ -521,34 +521,50 @@ app.post('/api/similar', authenticateToken, async (req, res) => {
     const username = req.user.username;
 
     try {
-        // Extract the ID or relevant info from the URL
-        const match = url.match(/\/post\/(\d+)/);
-        if (!match) {
-            throw new Error('Invalid post URL format');
+        if (!url) {
+            throw new Error('URL is required');
         }
-        const postId = match[1];
 
-        // Construct the search URL for similar posts
-        const baseUrl = url.split('/post/')[0];
-        const searchUrl = `${baseUrl}/post/${postId}`;
+        // Add detailed logging
+        console.log('Similar Posts Request:', {
+            username: username,
+            requestUrl: url,
+            timestamp: new Date().toISOString()
+        });
+
+        // Directly pass URL to scrapeVideos
+        const postLinks = await scrapeVideos(url, null, username);
         
-        console.log(`Finding similar posts for user ${username} from post: ${searchUrl}`);
-        
-        // Use the existing scrapeVideos function to scrape similar posts
-        const postLinks = await scrapeVideos(searchUrl, null, username);
-        
+        console.log('Scrape Results:', {
+            found: postLinks ? postLinks.length : 0,
+            url: url
+        });
+
         if (!postLinks || postLinks.length === 0) {
-            throw new Error('No similar posts found');
+            return res.status(404).json({
+                message: 'No posts found',
+                url: url
+            });
         }
 
         res.status(200).json({ 
-            message: 'Similar posts found successfully', 
-            count: postLinks.length 
+            message: 'Posts found successfully', 
+            count: postLinks.length,
+            url: url
         });
     } catch (error) {
-        console.error('Error finding similar posts:', error);
+        // Enhanced error logging
+        console.error('Similar Posts Error:', {
+            error: error.message,
+            stack: error.stack,
+            url: url,
+            username: username
+        });
+
         res.status(500).json({ 
-            message: error.message || 'Failed to find similar posts'
+            message: 'Failed to process URL',
+            error: error.message,
+            url: url
         });
     }
 });
