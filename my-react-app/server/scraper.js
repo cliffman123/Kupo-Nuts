@@ -26,7 +26,7 @@ const NEXT_PAGE_SELECTORS = [
 ];
 const PAGE_TARGET = process.env.PAGE_TARGET || 10;
 const uBlockPath = path.resolve('C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data/Default/Extensions/odfafepnkmbhccpbejgmiehpchacaeak/1.62.0_0');
-const PIXIV_LINKS_PATH = "C:/Users/cliff/.vscode/Website Project/my-react-app/build/pixivLinks.json";
+const PIXIV_LINKS_PATH = path.resolve(__dirname, '../build/pixivLinks.json');
 
 const PIXIV_USERNAME = process.env.PIXIV_USERNAME;
 const PIXIV_PASSWORD = process.env.PIXIV_PASSWORD;
@@ -309,9 +309,38 @@ const saveMediaLinks = (mediaLinks, username) => {
     console.log('Media links saved to', filePath);
 };
 
-const savePixivLinks = (pixivLinks) => {
-    fs.writeFileSync(PIXIV_LINKS_PATH, JSON.stringify(pixivLinks, null, 2));
-    console.log('Pixiv links saved to', PIXIV_LINKS_PATH);
+const savePixivLinks = (pixivLinks, username, providedLink) => {
+    if (!username) {
+        console.error('No username provided for saving Pixiv links');
+        return;
+    }
+    
+    const userDir = path.join(__dirname, '../build/users', username);
+    if (!fs.existsSync(userDir)) {
+        fs.mkdirSync(userDir, { recursive: true });
+    }
+    
+    const filePath = providedLink && providedLink.includes('discovery?mode=r18') 
+        ? path.join(userDir, 'pixivLinks.json') 
+        : path.join(userDir, 'links.json');
+    
+    let existingLinks = [];
+    
+    if (fs.existsSync(filePath)) {
+        const data = fs.readFileSync(filePath, 'utf-8');
+        existingLinks = JSON.parse(data);
+    }
+
+    // Merge new links with existing ones, avoiding duplicates
+    const newLinks = pixivLinks.filter(newLink => 
+        !existingLinks.some(existingLink => 
+            existingLink.postLink === newLink.postLink
+        )
+    );
+    
+    const updatedLinks = [...existingLinks, ...newLinks];
+    fs.writeFileSync(filePath, JSON.stringify(updatedLinks, null, 2));
+    console.log('Pixiv links saved to', filePath);
 };
 
 const clearPixivLinks = () => {
@@ -358,35 +387,23 @@ const scrapeSavedLinks = async () => {
     return links; // Return the list of post links
 };
 
-const processPixivLink = async (page, link, feedPageUrl) => {
+const processPixivLink = async (page, link, feedPageUrl, username) => {
     try {
         const artworkId = link.match(/\/artworks\/(\d+)/)[1];
         const apiUrl = `https://www.phixiv.net/api/info?id=${artworkId}&language=en`;
         await page.goto(apiUrl, { waitUntil: 'networkidle2' });
 
-        const mediaData = await page.evaluate(() => document.body.innerText); // Ensure mediaData is a string
+        const mediaData = await page.evaluate(() => document.body.innerText);
         if (mediaData) {
             const imageUrls = mediaData.match(/https:\/\/[^"]+\.(jpg|jpeg|png|gif|webp)/g) || [];
             if (imageUrls.length > 0) {
-                const mediaLink = { postLink: link, videoLinks: imageUrls }; // Use videoLinks for image URLs
+                const mediaLink = { postLink: link, videoLinks: imageUrls };
                 console.log('Image URLs:', imageUrls);
 
                 if (feedPageUrl.includes("bookmark_new_illust_r18") || feedPageUrl.includes("illustrations") || feedPageUrl.includes("artworks")) {
-                    let existingLinks = [];
-                    if (fs.existsSync(LINKS_PATH)) {
-                        const data = fs.readFileSync(LINKS_PATH, 'utf-8');
-                        existingLinks = JSON.parse(data);
-                    }
-                    existingLinks.push(mediaLink);
-                    saveMediaLinks(existingLinks);
+                    saveMediaLinks([mediaLink], username);
                 } else {
-                    let pixivLinks = [];
-                    if (fs.existsSync(PIXIV_LINKS_PATH)) {
-                        const data = fs.readFileSync(PIXIV_LINKS_PATH, 'utf-8');
-                        pixivLinks = JSON.parse(data);
-                    }
-                    pixivLinks.push(mediaLink);
-                    savePixivLinks(pixivLinks);
+                    savePixivLinks([mediaLink], username, feedPageUrl);
                 }
             }
         }
@@ -448,7 +465,7 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username) =
             const link = postLinksQueue.shift();
             // Check if the link already exists in links.json
             if (!allExistingLinks.some(existingLink => existingLink.postLink === link)) {
-                await processPixivLink(page, link, feedPageUrl);
+                await processPixivLink(page, link, feedPageUrl, username);
             } else {
                 console.log(`Skipping duplicate link: ${link}`);
             }

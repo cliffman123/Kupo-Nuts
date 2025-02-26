@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Masonry from 'react-masonry-css';
 import './VideoList.css';
+import JSZip from 'jszip';
+import defaultLinks from './default-links.json';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
@@ -10,7 +12,8 @@ const VideoList = () => {
     const [scrapeUrl, setScrapeUrl] = useState('');
     const [fullscreenMedia, setFullscreenMedia] = useState(null);
     const [loading, setLoading] = useState(false);
-    const [autoScroll, setAutoScroll] = useState(false);
+    const [isLoggedIn, setIsLoggedIn] = useState(false);
+    const [autoScroll, setAutoScroll] = useState(!isLoggedIn);
     const [filter, setFilter] = useState('default');
     const [showSettings, setShowSettings] = useState(false);
     const [notification, setNotification] = useState(null);
@@ -19,7 +22,6 @@ const VideoList = () => {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [loginError, setLoginError] = useState('');
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [passwordRequirements, setPasswordRequirements] = useState({
         length: false,
         uppercase: false,
@@ -28,6 +30,7 @@ const VideoList = () => {
         special: false
     });
     const [showProfileMenu, setShowProfileMenu] = useState(false);
+    const [isClickable, setIsClickable] = useState(true);
     const mediaRefs = useRef([]);
     const mediaSet = useRef(new Set());
     const observer = useRef();
@@ -56,22 +59,32 @@ const VideoList = () => {
     const fetchMedia = useCallback(async (page, limit) => {
         setLoading(true);
         try {
-            const response = await fetch(`${API_URL}/api/media`, {
-                ...fetchConfig,
-                cache: 'no-cache'
-            });
-            
-            if (!response.ok) {
-                if (response.status === 401) {
-                    setIsLoggedIn(false);
-                    setShowLogin(true);
-                    throw new Error('Please login to view media');
+            let mediaLinks;
+            if (isLoggedIn) {
+                const response = await fetch(`${API_URL}/api/media`, {
+                    ...fetchConfig,
+                    cache: 'no-cache'
+                });
+                
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        setIsLoggedIn(false);
+                        setShowLogin(true);
+                        throw new Error('Please login to view media');
+                    }
+                    throw new Error('Network response was not ok');
                 }
-                throw new Error('Network response was not ok');
+                
+                const data = await response.json();
+                mediaLinks = data.map(item => [item.postLink || '', item.videoLinks]);
+            } else {
+                // Only load default links if not logged in and they exist
+                if (!defaultLinks || defaultLinks.length === 0) {
+                    mediaLinks = [];
+                    return; // Exit early if no default links
+                }
+                mediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks]);
             }
-            
-            const data = await response.json();
-            const mediaLinks = data.map(item => [item.postLink || '', item.videoLinks]);
 
             // Prepare arrays before switch
             let sortedMediaLinks;
@@ -82,8 +95,8 @@ const VideoList = () => {
                 case 'newest':
                     sortedMediaLinks = reversedLinks;
                     break;
-                case 'discovery':
-                    sortedMediaLinks = [...mediaLinks];
+                case 'random':
+                    sortedMediaLinks = shuffleArray([...mediaLinks]); // Create completely random array
                     break;
                 default:
                     sortedMediaLinks = page % 2 === 0 ? reversedLinks : shuffledLinks;
@@ -112,7 +125,7 @@ const VideoList = () => {
         } finally {
             setLoading(false);
         }
-    }, [filter]);
+    }, [filter, isLoggedIn]);
 
     const setCookies = () => {
         const cookies = JSON.parse(localStorage.getItem('cookies'));
@@ -282,6 +295,7 @@ const VideoList = () => {
     };
 
     const handleMediaClick = (index) => {
+        if (!isClickable) return; // Prevent clicking if in cooldown
         setFullscreenMedia(index);
         mediaRefs.current.forEach((media, i) => {
             if (media && i !== index && media.tagName === 'VIDEO') media.pause();
@@ -293,10 +307,12 @@ const VideoList = () => {
         document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon, .similar-icon').forEach(button => {
             button.style.zIndex = '1002';
         });
+        document.querySelector('.profile-button').style.display = 'none';
     };
 
     const handleMediaClose = () => {
         setFullscreenMedia(null);
+        setIsClickable(false); // Disable clicking
         mediaRefs.current.forEach(media => {
             if (media && media.tagName === 'VIDEO') media.pause();
         });
@@ -307,6 +323,12 @@ const VideoList = () => {
         document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon').forEach(button => {
             button.style.zIndex = '';
         });
+        document.querySelector('.profile-button').style.display = '';
+        
+        // Enable clicking after 500ms (0.5 seconds)
+        setTimeout(() => {
+            setIsClickable(true);
+        }, 100);
     };
 
     const handleClickOutside = (event) => {
@@ -507,6 +529,17 @@ const VideoList = () => {
         }
     };
 
+    // Add this function to handle saving filter preference
+    const saveFilterPreference = (filterValue) => {
+        document.cookie = `preferred_filter=${filterValue}; max-age=31536000; path=/`; // Expires in 1 year
+    };
+
+    // Add this function to get filter from cookie
+    const getFilterFromCookie = () => {
+        const match = document.cookie.match(/preferred_filter=([^;]+)/);
+        return match ? match[1] : 'default';
+    };
+
     // Add this new effect to check login status on component mount
     useEffect(() => {
         const checkLoginStatus = async () => {
@@ -517,6 +550,10 @@ const VideoList = () => {
                 
                 if (response.ok) {
                     setIsLoggedIn(true);
+                    setAutoScroll(false); // Disable autoScroll when user logs in
+                    // Load saved filter preference
+                    const savedFilter = getFilterFromCookie();
+                    setFilter(savedFilter);
                     setCurrentPage(1);
                     setMediaUrls([]);
                     await fetchMedia(1, initialMediaPerPage);
@@ -536,26 +573,87 @@ const VideoList = () => {
 
     const handleExport = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/export-links`, {
-                ...fetchConfig
+            const mediaResponse = await fetch(`${API_URL}/api/export-links`, {
+                ...fetchConfig,
+                headers: {
+                    ...fetchConfig.headers,
+                    'Accept': 'application/json'
+                }
             });
             
-            if (!response.ok) throw new Error('Failed to export links');
+            if (!mediaResponse.ok) {
+                throw new Error(`Failed to export media links: ${mediaResponse.statusText}`);
+            }
             
-            const data = await response.json();
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'media-links.json';
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
+            const scrapeResponse = await fetch(`${API_URL}/api/export-scrape-list`, {
+                ...fetchConfig,
+                headers: {
+                    ...fetchConfig.headers,
+                    'Accept': 'application/json'
+                }
+            });
             
-            showNotification('Links exported successfully', 'success');
+            if (!scrapeResponse.ok) {
+                throw new Error(`Failed to export scrape links: ${scrapeResponse.statusText}`);
+            }
+
+            // Parse responses with error handling
+            let mediaData;
+            let scrapeData;
+            
+            try {
+                mediaData = await mediaResponse.json();
+                // Accept either array or object with links property
+                if (!Array.isArray(mediaData) && !mediaData.links) {
+                    mediaData = []; // Default to empty array if no valid data
+                }
+                // Convert to array if it's in object format
+                mediaData = Array.isArray(mediaData) ? mediaData : mediaData.links || [];
+            } catch (error) {
+                console.error('Media parse error:', error);
+                mediaData = []; // Default to empty array on parse error
+            }
+
+            try {
+                scrapeData = await scrapeResponse.json();
+                // Accept either array or object format
+                if (typeof scrapeData === 'string') {
+                    scrapeData = [scrapeData]; // Convert single string to array
+                } else if (!Array.isArray(scrapeData) && typeof scrapeData === 'object') {
+                    scrapeData = scrapeData.urls || Object.values(scrapeData) || []; // Try to extract URLs
+                } else if (!Array.isArray(scrapeData)) {
+                    scrapeData = []; // Default to empty array if no valid data
+                }
+            } catch (error) {
+                console.error('Scrape parse error:', error);
+                scrapeData = []; // Default to empty array on parse error
+            }
+            
+            // Create zip file with error handling
+            try {
+                const zip = new JSZip();
+                zip.file("media-links.json", JSON.stringify(mediaData, null, 2));
+                zip.file("scrape-links.json", JSON.stringify(scrapeData, null, 2));
+                
+                const content = await zip.generateAsync({ type: "blob" });
+                
+                // Create download link
+                const url = window.URL.createObjectURL(content);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'media-export.zip';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                
+                showNotification('Collection exported successfully', 'success');
+            } catch (error) {
+                throw new Error('Failed to create zip file: ' + error.message);
+            }
         } catch (error) {
-            showNotification('Failed to export links', 'error');
+            console.error('Export error:', error);
+            showNotification(error.message || 'Failed to export collection', 'error');
         }
     };
 
@@ -600,6 +698,49 @@ const VideoList = () => {
                     
                     showNotification(`Successfully imported ${validContent.length} links`, 'success');
                     // Refresh media after import
+                    setCurrentPage(1);
+                    setMediaUrls([]);
+                    await fetchMedia(1, initialMediaPerPage);
+                } catch (error) {
+                    console.error('Import error:', error);
+                    showNotification(error.message || 'Invalid file format', 'error');
+                }
+            };
+            reader.readAsText(file);
+        } catch (error) {
+            console.error('File reading error:', error);
+            showNotification('Failed to read import file', 'error');
+        }
+        // Reset file input
+        event.target.value = '';
+    };
+
+    const handleImportScrapeList = async (event) => {
+        try {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                try {
+                    const content = JSON.parse(e.target.result);
+                    
+                    const response = await fetch(`${API_URL}/api/import-scrape-list`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        ...fetchConfig,
+                        body: JSON.stringify(content)
+                    });
+
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.message || 'Failed to import scrape list');
+                    }
+
+                    const result = await response.json();
+                    showNotification(`Successfully imported ${result.total} URLs and started scraping`, 'success');
+                    
+                    // Refresh media after import and scrape
                     setCurrentPage(1);
                     setMediaUrls([]);
                     await fetchMedia(1, initialMediaPerPage);
@@ -724,16 +865,18 @@ const VideoList = () => {
                                         </button>
                                     )}
                                 </div>
-                                <button
-                                    className="remove-icon"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRemove(postLink, firstVideoLink); // Pass the specific video link
-                                    }}
-                                    aria-label="Remove media"
-                                >
-                                    <i className="fas fa-trash"></i>
-                                </button>
+                                {isLoggedIn && (
+                                    <button
+                                        className="remove-icon"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleRemove(postLink, firstVideoLink); // Pass the specific video link
+                                        }}
+                                        aria-label="Remove media"
+                                    >
+                                        <i className="fas fa-trash"></i>
+                                    </button>
+                                )}
                             </div>
                         );
                     })}
@@ -742,60 +885,74 @@ const VideoList = () => {
                     )}
                 </Masonry>
                 <div id="bottom-of-page"></div>
-                <div className="overlay-buttons">
-                    <button
-                        onClick={() => setShowSettings(!showSettings)}
-                        className="settings-button"
-                        aria-label="Settings"
-                    >
-                        <i className="fas fa-cog"></i>
-                    </button>
-                    <button
-                        onClick={() => setAutoScroll(!autoScroll)}
-                        className={`auto-scroll-button ${autoScroll ? 'active' : ''}`}
-                        aria-label="Toggle auto scroll"
-                    >
-                        <i className="fas fa-arrow-down"></i>
-                    </button>
-                    <button
-                        onClick={() => isLoggedIn ? setShowProfileMenu(!showProfileMenu) : setShowLogin(true)}
-                        className={`profile-button ${isLoggedIn ? 'logged-in' : ''}`}
-                        aria-label="Profile"
-                    >
-                        <i className={`fas ${isLoggedIn ? 'fa-user-check' : 'fa-user'}`}></i>
-                    </button>
-                    {showProfileMenu && isLoggedIn && (
-                        <div className="profile-menu">
-                            <div className="profile-menu-header">
-                                <h3>Profile Menu</h3>
-                                <button onClick={() => setShowProfileMenu(false)}>
-                                    <i className="fas fa-times"></i>
-                                </button>
+                {!showLogin && (
+                    <div className="overlay-buttons">
+                        {isLoggedIn && (
+                            <button
+                                onClick={() => setShowSettings(!showSettings)}
+                                className="settings-button"
+                                aria-label="Settings"
+                            >
+                                <i className="fas fa-cog"></i>
+                            </button>
+                        )}
+                        <button
+                            onClick={() => setAutoScroll(!autoScroll)}
+                            className={`auto-scroll-button ${autoScroll ? 'active' : ''}`}
+                            aria-label="Toggle auto scroll"
+                        >
+                            <i className="fas fa-arrow-down"></i>
+                        </button>
+                        <button
+                            onClick={() => isLoggedIn ? setShowProfileMenu(!showProfileMenu) : setShowLogin(true)}
+                            className={`profile-button ${isLoggedIn ? 'logged-in' : ''}`}
+                            aria-label="Profile"
+                        >
+                            <i className={`fas ${isLoggedIn ? 'fa-user-check' : 'fa-user'}`}></i>
+                        </button>
+                        {showProfileMenu && isLoggedIn && (
+                            <div className="profile-menu">
+                                <div className="profile-menu-header">
+                                    <h3>Profile Menu</h3>
+                                    <button onClick={() => setShowProfileMenu(false)}>
+                                        <i className="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <div className="profile-menu-content">
+                                    <button className="profile-menu-button" onClick={handleExport}>
+                                        <i className="fas fa-download"></i>
+                                        Export Collection
+                                    </button>
+                                    <label className="profile-menu-button">
+                                        <i className="fas fa-upload"></i>
+                                        Import Collection
+                                        <input
+                                            type="file"
+                                            accept=".json"
+                                            onChange={handleImport}
+                                            style={{ display: 'none' }}
+                                        />
+                                    </label>
+                                    <label className="profile-menu-button">
+                                        <i className="fas fa-list"></i>
+                                        Import Scrape List
+                                        <input
+                                            type="file"
+                                            accept=".json"
+                                            onChange={handleImportScrapeList}
+                                            style={{ display: 'none' }}
+                                        />
+                                    </label>
+                                    <div className="profile-menu-divider"></div>
+                                    <button className="profile-menu-button danger" onClick={handleLogout}>
+                                        <i className="fas fa-sign-out-alt"></i>
+                                        Logout
+                                    </button>
+                                </div>
                             </div>
-                            <div className="profile-menu-content">
-                                <button className="profile-menu-button" onClick={handleExport}>
-                                    <i className="fas fa-download"></i>
-                                    Export Collection
-                                </button>
-                                <label className="profile-menu-button">
-                                    <i className="fas fa-upload"></i>
-                                    Import Collection
-                                    <input
-                                        type="file"
-                                        accept=".json"
-                                        onChange={handleImport}
-                                        style={{ display: 'none' }}
-                                    />
-                                </label>
-                                <div className="profile-menu-divider"></div>
-                                <button className="profile-menu-button danger" onClick={handleLogout}>
-                                    <i className="fas fa-sign-out-alt"></i>
-                                    Logout
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
+                        )}
+                    </div>
+                )}
                 {showSettings && (
                     <div className="settings-dialog">
                         <div className="settings-content">
@@ -840,11 +997,15 @@ const VideoList = () => {
                                     <select 
                                         id="filter" 
                                         value={filter} 
-                                        onChange={(e) => setFilter(e.target.value)}
+                                        onChange={(e) => {
+                                            const newFilter = e.target.value;
+                                            setFilter(newFilter);
+                                            saveFilterPreference(newFilter);
+                                        }}
                                     >
                                         <option value="Default">Default</option>
                                         <option value="Newest">Newest</option>
-                                        <option value="Discovery">Discovery (Pixiv)</option>
+                                        <option value="Random">Random</option>
                                     </select>
                                 </div>
                             </div>

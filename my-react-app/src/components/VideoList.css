@@ -417,6 +417,10 @@ video, img {
     left: 50px;
 }
 
+.media-wrapper.fullscreen .profile-button {
+    display: none;
+}
+
 .filter-container {
     display: none;
 }
@@ -1007,4 +1011,8 @@ label.profile-menu-button {
     height: 1px;
     background-color: #333;
     margin: 8px 0;
+}
+
+.media-wrapper.fullscreen .profile-button{
+    display: none;
 }

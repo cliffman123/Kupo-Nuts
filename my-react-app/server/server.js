@@ -23,38 +23,19 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: false, // Set to false for HTTP in development
+        secure: false, // Set to false for local HTTP
+        sameSite: 'lax',
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
 
-// Update CORS configuration
+// Update CORS configuration to support ngrok
 app.use(cors({
-    origin: [
-        'https://kupo-nuts-svi8.vercel.app', 
-        'https://kupo-nuts.vercel.app',
-        process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : null
-    ].filter(Boolean),
+    origin: 'http://localhost:3000',
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept']
+    allowedHeaders: ['Content-Type', 'Authorization']
 }));
-
-// Simplify headers middleware
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    // Allow ngrok domains
-    if (origin && (
-        ['https://kupo-nuts-svi8.vercel.app', 'https://kupo-nuts.vercel.app'].includes(origin) ||
-        origin.match(/\.ngrok\.io$/)
-    )) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, DELETE');
-        res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    }
-    next();
-});
 
 app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
@@ -224,8 +205,8 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
         // Set token in cookie with updated settings
         res.cookie('token', token, {
             httpOnly: true,
-            secure: true, // Set to true since Vercel uses HTTPS
-            sameSite: 'none', // Required for cross-site cookies
+            secure: false, // Set to false for local HTTP
+            sameSite: 'lax', // Required for ngrok
             path: '/',
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         });
@@ -569,6 +550,43 @@ app.post('/api/similar', authenticateToken, async (req, res) => {
         res.status(500).json({ 
             message: error.message || 'Failed to find similar posts'
         });
+    }
+});
+
+// Add new endpoint for importing scrape list
+app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
+    const filePath = getUserFilePath(req.user.username, 'scrape-links');
+    
+    try {
+        const newLinks = req.body;
+        
+        if (!Array.isArray(newLinks)) {
+            return res.status(400).json({ error: 'Invalid format: expected array' });
+        }
+
+        // Validate URLs
+        const validLinks = newLinks.filter(link => 
+            typeof link === 'string' && 
+            (link.startsWith('http://') || link.startsWith('https://'))
+        );
+
+        if (validLinks.length === 0) {
+            return res.status(400).json({ error: 'No valid URLs found in import file' });
+        }
+
+        // Replace existing scrape links with the imported ones
+        fs.writeFileSync(filePath, JSON.stringify(validLinks, null, 2), 'utf8');
+        
+        // Automatically start scraping the new links
+        await scrapeSavedLinks(req.user.username);
+        
+        res.json({ 
+            message: 'Scrape list imported and scraping started', 
+            total: validLinks.length
+        });
+    } catch (error) {
+        console.error('Error importing scrape list:', error);
+        res.status(500).json({ error: 'Failed to import scrape list' });
     }
 });
 
