@@ -1,21 +1,180 @@
+/* Base styles */
 body {
     background-color: #121212;
     color: #ffffff;
-    font-family: 'Roboto', sans-serif; /* Use a modern font */
+    font-family: 'Roboto', sans-serif;
     margin: 0;
     padding: 0;
 }
 
+/* Layout */
+.main-content {
+    display: flex;
+    justify-content: center;
+    padding: 40px 80px 100px;
+}
+
+/* Media grid */
+#media-container {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    width: 100%;
+    max-width: 1700px;
+    margin: 0 auto;
+}
+
+/* Common button styles */
+.settings-button,
+.auto-scroll-button,
+.profile-button,
+.media-wrapper.fullscreen .close-icon,
+.media-wrapper.fullscreen .postlink-icon,
+.media-wrapper.fullscreen .remove-icon,
+.media-wrapper.fullscreen .similar-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #fff;
+    border: 1px solid #ccc;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    transform: scale(1.5);
+}
+
+/* Button positions */
+.auto-scroll-button { bottom: 100px; right: 20px; }
+.settings-button { bottom: 200px; right: 20px; }
+.profile-button { top: 20px; right: 20px; }
+
+/* Button hover states */
+.settings-button:hover,
+.auto-scroll-button:hover,
+.profile-button:hover,
+.media-wrapper.fullscreen .close-icon:hover,
+.media-wrapper.fullscreen .postlink-icon:hover,
+.media-wrapper.fullscreen .remove-icon:hover,
+.media-wrapper.fullscreen .similar-icon:hover {
+    background-color: #f0f0f0;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.settings-button:hover i,
+.auto-scroll-button:hover i,
+.profile-button:hover i {
+    color: #00bfa5;
+}
+
+/* Auto-scroll active state */
+.auto-scroll-button.active {
+    background-color: #ff0000;
+}
+
+.auto-scroll-button.active:hover {
+    background-color: #ff3333;
+}
+
+.auto-scroll-button.active i {
+    color: #fff;
+}
+
+/* Media wrapper */
+.media-wrapper {
+    position: relative;
+    border-radius: 10px;
+    overflow: hidden;
+    width: 100%;
+    transition: all 0.3s ease;
+}
+
+/* Fullscreen mode */
+.media-wrapper.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    padding: 20px;
+    box-sizing: border-box;
+    z-index: 1001;
+    background-color: rgba(0, 0, 0, 0.8);
+    overflow: auto;
+}
+
+/* Media elements */
+video, img {
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+    background-color: #000;
+    max-height: 1000px;
+}
+
+/* Masonry grid */
+.masonry-grid {
+    display: flex;
+    margin-left: -16px;
+    width: auto;
+}
+
+.masonry-grid_column {
+    padding-left: 16px;
+    background-clip: padding-box;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+/* Notifications */
+.notification {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 15px 20px;
+    border-radius: 8px;
+    background-color: #1e1e1e;
+    color: white;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    z-index: 1010;
+    max-width: 300px;
+    animation: slideIn 0.3s ease-out;
+}
+
+/* Animations */
+@keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.98); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+/* Fade in animation classes */
+.fade-in {
+    opacity: 0;
+}
+
+.fade-in.visible {
+    animation: fadeIn 0.5s ease-out forwards;
+}
+
+/* Header */
 .header {
     background-color: #00bfa5;
     color: #ffffff;
     padding: 20px;
     text-align: center;
     border-bottom: 2px solid #00bfa5;
-    font-size: 24px; /* Increase font size */
-    font-weight: bold; /* Make text bold */
+    font-size: 24px;
+    font-weight: bold;
 }
 
+/* Footer */
 .footer {
     background-color: #00bfa5;
     color: #ffffff;
@@ -25,41 +184,10 @@ body {
     position: fixed;
     width: 100%;
     bottom: 0;
-    font-size: 14px; /* Set font size */
+    font-size: 14px;
 }
 
-.main-content {
-    display: flex;
-    justify-content: center;
-    padding: 40px 80px;
-    padding-bottom: 100px; /* Add padding to avoid overlap with footer */
-}
-
-#media-container {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    position: relative;
-    grid-auto-rows: auto;
-    width: 100%;
-    max-width: 1700px;
-    margin: 0 auto;
-}
-
-.media-wrapper {
-    position: relative;
-    border-radius: 10px;
-    overflow: hidden;
-    width: 100%;
-    display: inline-block;
-    grid-row-end: span 1;
-    transition: transform 0.3s, box-shadow 0.3s;
-}
-
-.media-wrapper:hover {
-    transform: scale(1.05);
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
-}
-
+/* Media container */
 .media-wrapper.fullscreen:hover {
     transform: none;
     box-shadow: none;
@@ -71,14 +199,6 @@ body {
     overflow: hidden;
     width: 100%;
     height: auto;
-}
-
-video, img {
-    width: 100%;
-    height: auto;
-    object-fit: cover;
-    background-color: #000000;
-    max-height: 1000px;
 }
 
 .media-container iframe {
@@ -134,7 +254,6 @@ video, img {
 
 .scrape-button:hover {
     background-color: #00a693;
-    transform: scale(2);
 }
 
 .scrape-icon {
@@ -173,7 +292,7 @@ video, img {
     border: 1px solid #ccc;
     border-radius: 5px;
     margin-right: 10px;
-    width: 300px; /* Increase the width */
+    width: 300px;
 }
 
 .scrape-input-container button {
@@ -184,25 +303,11 @@ video, img {
     background-color: #00bfa5;
     color: #ffffff;
     cursor: pointer;
-    height: 42px; /* Match the height of the input */
+    height: 42px;
 }
 
 .scrape-input-container button:hover {
     background-color: #00a693;
-}
-
-.masonry-grid {
-    display: flex;
-    margin-left: -16px; /* Adjust the margin to match the gap */
-    width: auto;
-}
-
-.masonry-grid_column {
-    padding-left: 16px; /* Adjust the padding to match the gap */
-    background-clip: padding-box;
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
 }
 
 .loading-spinner {
@@ -228,40 +333,6 @@ video, img {
     100% {
         transform: rotate(360deg);
     }
-}
-
-.auto-scroll-button {
-    position: fixed;
-    bottom: 100px;
-    right: 20px; /* Changed from 50px to 20px to match profile button */
-    padding: 10px;
-    background-color: #00bfa5;
-    color: #ffffff;
-    border: none;
-    cursor: pointer;
-    font-size: 16px;
-    border-radius: 5px;
-    z-index: 1005;
-    transition: background-color 0.3s, transform 0.3s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transform: scale(1.5);
-}
-
-.auto-scroll-button:hover {
-    background-color: #00a693;
-    transform: scale(2);
-}
-
-.auto-scroll-button.active,
-.auto-scroll-button.active:hover {
-    background-color: #ff0000;
-}
-
-.auto-scroll-icon {
-    width: 24px;
-    height: 24px;
 }
 
 .postlink-icon, .close-icon, .remove-icon, .similar-icon {
@@ -298,23 +369,6 @@ video, img {
     position: absolute;
     top: 10px;
     left: 10px;
-}
-
-.media-wrapper.fullscreen {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100vw;
-    height: 100vh;
-    padding: 20px;
-    box-sizing: border-box;
-    z-index: 1001;
-    display: flex;
-    justify-content: center;
-    align-items: flex-start;
-    visibility: visible;
-    background-color: rgba(0, 0, 0, 0.8);
-    overflow: auto;
 }
 
 .media-wrapper.fullscreen img,
@@ -425,36 +479,6 @@ video, img {
     display: none;
 }
 
-.settings-button {
-    position: fixed;
-    bottom: 200px;
-    right: 20px; /* Changed from 50px to 20px to match profile button */
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: #fff;
-    border: 1px solid #ccc;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    cursor: pointer;
-    z-index: 1005;
-    transition: background-color 0.3s, box-shadow 0.3s;
-    transform: scale(1.5);
-}
-
-.settings-button:hover {
-    background-color: #f0f0f0;
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    transform: scale(2);
-}
-
-.settings-button i {
-    font-size: 20px;
-    color: #333;
-}
-
 .settings-dialog {
     position: fixed;
     top: 0;
@@ -527,25 +551,8 @@ video, img {
 
 .loading-placeholder {
     width: 100%;
-    padding-top: 56.25%; /* 16:9 aspect ratio */
+    padding-top: 56.25%;
     background-color: #f0f0f0;
-}
-
-.notification {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    padding: 15px 20px;
-    border-radius: 8px;
-    background-color: #1e1e1e;
-    color: white;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    z-index: 1010;
-    max-width: 300px;
-    animation: slideIn 0.3s ease-out;
-    display: flex;
-    align-items: center;
-    gap: 10px;
 }
 
 .notification.success {
@@ -574,17 +581,6 @@ video, img {
     animation: progress 3s linear;
 }
 
-@keyframes slideIn {
-    from {
-        transform: translateX(100%);
-        opacity: 0;
-    }
-    to {
-        transform: translateX(0);
-        opacity: 1;
-    }
-}
-
 @keyframes progress {
     from {
         width: 100%;
@@ -609,14 +605,17 @@ video, img {
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     cursor: pointer;
     z-index: 1005;
-    transition: background-color 0.3s, box-shadow 0.3s;
+    transition: background-color 0.3s, color 0.3s, box-shadow 0.3s;
     transform: scale(1.5);
 }
 
 .profile-button:hover {
     background-color: #f0f0f0;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-    transform: scale(2);
+}
+
+.profile-button:hover i {
+    color: #00bfa5;
 }
 
 .profile-button i {
@@ -847,7 +846,7 @@ video, img {
     padding: 8px;
     display: flex;
     flex-direction: column;
-    align-items: flex-start; /* Add this to align buttons to the start */
+    align-items: flex-start;
 }
 
 .profile-menu-button {
@@ -863,7 +862,7 @@ video, img {
     align-items: center;
     gap: 8px;
     font-size: 14px;
-    box-sizing: border-box; /* Add this to include padding in width calculation */
+    box-sizing: border-box;
 }
 
 .profile-menu-button,
@@ -876,27 +875,7 @@ label.profile-menu-button {
 
 .profile-menu-button:hover {
     background-color: #3c3c3c;
-}
-
-.profile-menu-button i {
-    width: 16px;
-    text-align: center;
-}
-
-/* Add styles for the button label */
-.profile-menu-button.label-button {
-    width: auto;
-    padding-right: 16px;
-}
-
-/* Add styles for the input container */
-.profile-menu-button-container {
-    position: relative;
-    display: inline-block;
-}
-
-.profile-menu-button:hover {
-    background-color: #00bfa5;
+    border-color: #00bfa5;
 }
 
 .profile-menu-button:active {
@@ -1013,6 +992,66 @@ label.profile-menu-button {
     margin: 8px 0;
 }
 
-.media-wrapper.fullscreen .profile-button{
+.settings-button,
+.auto-scroll-button,
+.profile-button {
+    position: fixed;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #fff;
+    border: 1px solid #ccc;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    cursor: pointer;
+    z-index: 1005;
+    transition: background-color 0.3s, color 0.3s, box-shadow 0.3s;
+    transform: scale(1.5);
+}
+
+.settings-button:hover,
+.auto-scroll-button:hover,
+.profile-button:hover {
+    background-color: #f0f0f0;
+}
+
+.settings-button:hover i,
+.auto-scroll-button:hover i,
+.profile-button:hover i {
+    color: #00bfa5;
+}
+
+/* Special case for active auto-scroll */
+.auto-scroll-button.active {
+    background-color: #ff0000;
+}
+
+.auto-scroll-button.active:hover {
+    background-color: #ff3333;
+}
+
+.auto-scroll-button.active i {
+    color: #fff;
+}
+
+/* Position specifics */
+.auto-scroll-button {
+    bottom: 100px;
+    right: 20px;
+}
+
+.settings-button {
+    bottom: 200px;
+    right: 20px;
+}
+
+.profile-button {
+    top: 20px;
+    right: 20px;
+}
+
+.media-wrapper.fullscreen .profile-button {
     display: none;
 }

@@ -854,6 +854,10 @@ const VideoList = () => {
         event.target.value = '';
     };
 
+    const handleMediaLoad = (e) => {
+        e.target.classList.add('visible');
+    };
+
     return (
         <div>
             {notification && (
@@ -900,7 +904,9 @@ const VideoList = () => {
                                             controls
                                             muted={fullscreenMedia !== index}
                                             loop
-                                            onError={(e) => handleVideoError(e, firstVideoLink)}
+                                            className="fade-in"
+                                            onLoadedData={handleMediaLoad}
+                                            onError={(e) => handleVideoError(e)}
                                             onLoadStart={() => {
                                                 setCookies();
                                             }}
@@ -910,19 +916,20 @@ const VideoList = () => {
                                             ref={el => mediaRefs.current[index] = el}
                                             src={firstVideoLink}
                                             alt="Media"
+                                            className="fade-in"
+                                            onLoad={handleMediaLoad}
                                             onError={(e) => handleImageError(e, firstVideoLink, index)}
                                         />
                                     )}
                                     {fullscreenMedia === index && videoLinks.slice(1).map((link, i) => (
                                         <div key={i} className="fullscreen-media-container">
-                                            <img className='fullscreen-media'
+                                            <img 
+                                                className='fullscreen-media fade-in'
                                                 ref={el => mediaRefs.current[`${index}_${i}`] = el}
                                                 src={link}
                                                 alt="Media"
+                                                onLoad={handleMediaLoad}
                                                 onError={(e) => handleImageError(e, link, index)}
-                                                onLoad={() => {
-                                                    setCookies();
-                                                }}
                                             />
                                         </div>
                                     ))}
