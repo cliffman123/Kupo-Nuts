@@ -33,6 +33,8 @@ const VideoList = () => {
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [isClickable, setIsClickable] = useState(true);
     const [loadedMedia, setLoadedMedia] = useState({});
+    const [authChecked, setAuthChecked] = useState(false);
+    const [authError, setAuthError] = useState(null);
     const mediaRefs = useRef([]);
     const mediaSet = useRef(new Set());
     const observer = useRef();
@@ -50,13 +52,13 @@ const VideoList = () => {
         return array;
     };
 
-    const fetchConfig = {
+    const fetchConfig = useMemo(() => ({
         credentials: 'include',
         headers: {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
         }
-    };
+    }), []);
 
     const fetchMedia = useCallback(async (page, limit) => {
         setLoading(true);
@@ -626,13 +628,15 @@ const VideoList = () => {
                 throw new Error(data.message || 'Login failed');
             }
 
+            // Store login success in state
             setIsLoggedIn(true);
             setShowLogin(false);
+            setAuthError(null);
             showNotification('Login successful', 'success');
             setUsername('');
             setPassword('');
             
-            // Add this: Reset page and fetch media after successful login
+            // Reset page and fetch media after successful login
             setCurrentPage(1);
             setMediaUrls([]);
             await fetchMedia(1, initialMediaPerPage);
@@ -702,36 +706,56 @@ const VideoList = () => {
         return match ? match[1] : 'default';
     };
 
-    // Add this new effect to check login status on component mount
+    // Improved check login status function
     useEffect(() => {
         const checkLoginStatus = async () => {
             try {
+                console.log('Checking auth status with API:', API_URL);
+                setAuthChecked(false);
+                
                 const response = await fetch(`${API_URL}/api/profile`, {
-                    ...fetchConfig
+                    ...fetchConfig,
+                    cache: 'no-cache'
                 });
                 
+                console.log('Auth response status:', response.status);
+                
                 if (response.ok) {
+                    const userData = await response.json();
+                    console.log('User authenticated:', userData.username);
                     setIsLoggedIn(true);
+                    setAuthError(null);
                     setAutoScroll(false); // Disable autoScroll when user logs in
+                    
                     // Load saved filter preference
                     const savedFilter = getFilterFromCookie();
                     setFilter(savedFilter);
-                    setCurrentPage(1);
-                    setMediaUrls([]);
-                    await fetchMedia(1, initialMediaPerPage);
                 } else {
+                    console.log('Authentication failed:', response.status);
                     setIsLoggedIn(false);
-                    setShowLogin(true);
+                    setAuthError(`Auth failed: ${response.status}`);
+                    
+                    // Only show login if it's a 401 error
+                    if (response.status === 401) {
+                        setShowLogin(true);
+                    }
                 }
             } catch (error) {
                 console.error('Error checking login status:', error);
                 setIsLoggedIn(false);
-                setShowLogin(true);
+                setAuthError(`Auth error: ${error.message}`);
+            } finally {
+                setAuthChecked(true);
+                
+                // Initialize the page with appropriate media regardless of auth status
+                setCurrentPage(1);
+                setMediaUrls([]);
+                await fetchMedia(1, initialMediaPerPage);
             }
         };
 
         checkLoginStatus();
-    }, []);
+    }, [API_URL, fetchConfig]);
 
     const handleExport = async () => {
         try {
@@ -928,8 +952,18 @@ const VideoList = () => {
         }));
     };
 
+    // Add a debug component to show auth status
+    const AuthDebugger = () => {
+        if (!authChecked) return <div className="auth-status loading">Checking authentication...</div>;
+        if (authError) return <div className="auth-status error">Error: {authError}</div>;
+        return null;
+    };
+
     return (
         <div>
+            {/* Add auth debugging info (only visible during development) */}
+            {process.env.NODE_ENV === 'development' && <AuthDebugger />}
+            
             <div className="notifications-container">
                 {notifications.map((notification, index) => (
                     <div 

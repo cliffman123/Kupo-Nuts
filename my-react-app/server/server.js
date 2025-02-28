@@ -41,26 +41,32 @@ app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
 app.use(cookieParser());
 
-// Authentication middleware
+// Improved Authentication middleware with better error reporting
 const authenticateToken = (req, res, next) => {
     const token = req.cookies.token;
+    
+    console.log('Auth middleware - cookies:', req.cookies);
+    console.log('Auth middleware - token present:', !!token);
 
     if (!token) {
-        return res.status(401).json({ message: 'Authentication required' });
+        console.log('No authentication token provided');
+        return res.status(401).json({ message: 'Authentication required - no token' });
     }
 
     try {
         const user = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret');
         req.user = user;
+        console.log('Token verified for user:', user.username);
         
         // Check if user exists in our users object
         if (!users[user.username]) {
+            console.log('User not found in users object:', user.username);
             return res.status(401).json({ message: 'User not found' });
         }
         
         next();
     } catch (err) {
-        console.error('Token verification error:', err);
+        console.error('Token verification error:', err.message);
         res.clearCookie('token');
         return res.status(403).json({ message: 'Invalid or expired token' });
     }
@@ -163,6 +169,7 @@ app.post('/api/register', validatePassword, async (req, res) => {
     }
 });
 
+// Update app.post('/api/login') to set cookies properly
 app.post('/api/login', checkLoginAttempts, async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -202,16 +209,17 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        // Set token in cookie with updated settings
+        // Set token in cookie with updated settings for cross-domain compatibility
         res.cookie('token', token, {
             httpOnly: true,
-            secure: false, // Set to false for local HTTP
-            sameSite: 'lax', // Required for ngrok
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
             path: '/',
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         });
-
-        res.json({ message: 'Login successful' });
+        
+        console.log('Login successful - token set in cookie for user:', username);
+        res.json({ message: 'Login successful', username });
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ message: 'Internal server error' });
@@ -634,6 +642,15 @@ const clearUserData = () => {
 
 // Clear user data when server starts
 clearUserData();
+
+// Add a status endpoint that doesn't require authentication
+app.get('/api/status', (req, res) => {
+    res.json({ 
+        status: 'ok',
+        time: new Date().toISOString(),
+        cookiesPresent: Object.keys(req.cookies).length > 0
+    });
+});
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on port ${PORT}`);
