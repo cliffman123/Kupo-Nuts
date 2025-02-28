@@ -11,11 +11,13 @@ const authenticateToken = (req, res, next) => {
     next();
 };
 
-// Enable CORS for GitHub Pages domain
+// Enable CORS for GitHub Pages domain and ngrok
 app.use(cors({
     origin: [
         'https://yourgithubusername.github.io',
-        'http://localhost:3000' // For local development
+        'https://cliffman123.github.io',
+        'http://localhost:3000', // For local development
+        'https://9000-2600-4040-441b-5e00-8534-daac-9f21-baa.ngrok-free.app' // Your ngrok URL
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true

@@ -1,9 +1,0 @@
-{
-    "scripts": {
-        "start": "concurrently \"cd backend && npm run start\" \"cd my-react-app && npm start\"",
-        "dev": "concurrently \"cd backend && npm run dev\" \"cd my-react-app && npm start\"",
-        "predeploy": "cd my-react-app && npm run build",
-        "deploy": "cd my-react-app && npm run deploy"
-    },
-    "homepage": "https://yourgithubusername.github.io/repository-name"
-}
