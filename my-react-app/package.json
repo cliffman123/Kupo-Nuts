@@ -2,6 +2,7 @@
   "name": "my-react-app",
   "version": "1.0.0",
   "private": true,
+  "homepage": "https://cliffman123.github.io/Kupo-Nuts",
   "scripts": {
     "start": "react-scripts start",
     "build": "CI=false && react-scripts build",
@@ -29,7 +30,6 @@
     "dotenv": "^10.0.0",
     "express": "^4.21.2",
     "express-session": "^1.18.1",
-    "gh-pages": "^6.3.0",
     "http-proxy-middleware": "^3.0.3",
     "https-browserify": "^1.0.0",
     "jsonwebtoken": "^9.0.2",
@@ -57,7 +57,8 @@
     "util": "^0.12.5",
     "util.promisify": "^1.1.1",
     "uuid": "^9.0.1",
-    "vm-browserify": "^1.1.2"
+    "vm-browserify": "^1.1.2",
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@babel/plugin-transform-class-properties": "^7.23.3",
@@ -71,6 +72,7 @@
     "babel-plugin-polyfill-corejs3": "^0.8.7",
     "babel-plugin-polyfill-regenerator": "^0.5.5",
     "eslint": "^8.56.0",
+    "gh-pages": "^6.3.0",
     "rimraf": "^5.0.5"
   },
   "eslintConfig": {
@@ -89,6 +91,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "homepage": "/"
+  }
 }

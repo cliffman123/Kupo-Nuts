@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3001;
 
 // Middleware to authenticate token
 const authenticateToken = (req, res, next) => {
@@ -11,13 +11,17 @@ const authenticateToken = (req, res, next) => {
     next();
 };
 
-// Add CORS middleware
+// Enable CORS for GitHub Pages domain
 app.use(cors({
-    origin: process.env.CORS_ORIGIN || 'http://localhost:3000',
+    origin: [
+        'https://yourgithubusername.github.io',
+        'http://localhost:3000' // For local development
+    ],
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true
 }));
 
-// Add body parser middleware
+// Parse JSON bodies
 app.use(express.json());
 
 // Fix the pixiv-links endpoint

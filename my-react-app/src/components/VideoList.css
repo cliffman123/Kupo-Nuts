@@ -553,33 +553,46 @@ video, img {
     background-color: #f0f0f0;
 }
 
-.notification {
+.notifications-container {
     position: fixed;
-    top: 20px;
-    right: 20px;
+    left: 20px;
+    top: 0;
+    z-index: 1000;
+    pointer-events: none;
+}
+
+.notification {
+    position: absolute;
+    left: 0;
     padding: 15px 20px;
-    border-radius: 8px;
-    background-color: #1e1e1e;
-    color: white;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    z-index: 1010;
-    max-width: 300px;
-    animation: slideIn 0.3s ease-out;
-    display: flex;
-    align-items: center;
-    gap: 10px;
+    border-radius: 5px;
+    min-width: 250px;
+    max-width: 350px;
+    background-color: #2e2e2e;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    animation: slideInLeft 0.3s ease-out;
+    pointer-events: auto;
+    transition: top 0.3s ease-in-out;
 }
 
 .notification.success {
+    background-color: #1a2e2b; /* Darker background for success */
     border-left: 4px solid #00bfa5;
 }
 
 .notification.error {
+    background-color: #2e1a1a; /* Darker background for error */
     border-left: 4px solid #ff5252;
 }
 
 .notification.info {
+    background-color: #1a202e; /* Darker background for info */
     border-left: 4px solid #2196f3;
+}
+
+.notification.progress {
+    background-color: #1a2e2b;
+    border-left: 4px solid #00bfa5;
 }
 
 .notification-message {
@@ -596,9 +609,24 @@ video, img {
     animation: progress 3s linear;
 }
 
-@keyframes slideIn {
+.notification-progress-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    background-color: #00bfa5;
+    transition: width 0.3s ease;
+}
+
+.notification-count {
+    margin-top: 5px;
+    font-size: 12px;
+    color: #888;
+}
+
+@keyframes slideInLeft {
     from {
-        transform: translateX(100%);
+        transform: translateX(-100%);
         opacity: 0;
     }
     to {
@@ -1036,4 +1064,63 @@ label.profile-menu-button {
 
 .media-wrapper.fullscreen .profile-button{
     display: none;
+}
+
+/* Add spinner for in-progress notifications */
+.notification-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+.notification-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(0, 191, 165, 0.3);
+    border-radius: 50%;
+    border-top-color: #00bfa5;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Add fadeIn animation keyframes */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Apply animation to images and videos when they load */
+.media-loaded {
+  animation: fadeIn 0.5s ease-in;
+}
+
+/* Add placeholder style for unloaded media */
+.media-loading {
+  background-color: #242424;
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.media-loading::after {
+  content: "";
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(255, 255, 255, 0.1);
+  border-top-color: #00bfa5;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
 }

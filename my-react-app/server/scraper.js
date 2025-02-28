@@ -39,8 +39,10 @@ const loadCookies = async (page) => {
     }
 };
 
-const scrapeVideos = async (providedLink = null, page = null, username = null) => {
+const scrapeVideos = async (providedLink = null, page = null, username = null, progressCallback = null) => {
     let browser;
+    let totalLinksAdded = 0;  // Add this line to track total links
+    
     try {
         const postLinksQueue = [];
         
@@ -63,12 +65,12 @@ const scrapeVideos = async (providedLink = null, page = null, username = null) =
 
         if ((!providedLink) || providedLink.includes('pixiv')) {
             await loginToPixiv(page, providedLink);
-            await collectPixivLinks(page, postLinksQueue, providedLink, username);
+            totalLinksAdded = await collectPixivLinks(page, postLinksQueue, providedLink, username, progressCallback);
         } else {
-            await handleProvidedLink(page, providedLink, postLinksQueue, [], username);
+            totalLinksAdded = await handleProvidedLink(page, providedLink, postLinksQueue, [], username, progressCallback);
         }
 
-        return postLinksQueue; // Return the list of processed links
+        return { postLinksQueue, linksAdded: totalLinksAdded }; // Return both the queue and count
     } catch (error) {
         console.error('Error scraping videos:', error);
         throw error;
@@ -125,8 +127,9 @@ const navigateToFeed = async (page, providedLink) => {
     console.log('Successfully navigated to the Pixiv page.');
 };
 
-const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLinks, username) => {
+const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLinks, username, progressCallback) => {
     console.log('Provided link:', providedLink);
+    let totalAdded = 0;  // Add counter
 
     await page.goto(providedLink, { waitUntil: 'networkidle2' });
 
@@ -136,10 +139,12 @@ const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLi
         await page.click(buttonSelector);
     }
 
-    await collectAndScrapeLinks(page, postLinksQueue, existingLinks, providedLink, username);
+    totalAdded = await collectAndScrapeLinks(page, postLinksQueue, existingLinks, providedLink, username, progressCallback);
+    return totalAdded;  // Return the total
 };
 
-const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, providedLink = null, username) => {
+const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, providedLink = null, username, progressCallback) => {
+    let totalAdded = 0;  // Add counter
     let pageCount = 0;
     let feedPageUrl = providedLink || FEED_URL;
     const mediaSelectors = [
@@ -178,7 +183,13 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
         }
         while (postLinksQueue.length > 0) {
             const link = postLinksQueue.shift();
-            await processLink(page, link, existingLinks, mediaSelectors, username);
+            const newLinks = await processLink(page, link, existingLinks, mediaSelectors, username, progressCallback);
+            totalAdded += newLinks;  // Add the new links to total
+            
+            // Call progress callback with current total
+            if (progressCallback) {
+                progressCallback(totalAdded);
+            }
         }
 
         await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
@@ -207,15 +218,17 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
         console.log(`New links added: ${newPostLinks.length}`);
         console.log(`Total links count: ${existingLinks.length}`);
     }
+    
+    return totalAdded;  // Return the total
 };
 
-const processLink = async (page, link, existingLinks, mediaSelectors, username) => {
+const processLink = async (page, link, existingLinks, mediaSelectors, username, progressCallback) => {
     try {
         const jinaLink = link.includes('kemono.su') ? `https://r.jina.ai/${link}` : link;
         const response = await page.goto(jinaLink, { waitUntil: 'networkidle2' });
         if (!response || response.status() === 404) { // Add null check for response
             console.error(`Resource not found at ${jinaLink} (404)`);
-            return;
+            return 0;
         }
 
         let mediaData;
@@ -228,11 +241,23 @@ const processLink = async (page, link, existingLinks, mediaSelectors, username) 
 
         if (mediaData) {
             const mediaLink = { postLink: link, videoLinks: [mediaData] }; // Add video link with square brackets
-            saveMediaLinks([mediaLink], username);
+            const linksAdded = saveMediaLinks([mediaLink], username);
             existingLinks.push(mediaLink);
+            
+            // Log progress
+            console.log(`Added ${linksAdded} new links, current total: ${existingLinks.length}`);
+            
+            // Call progress callback each time we add links
+            if (progressCallback) {
+                progressCallback(linksAdded);
+            }
+            
+            return linksAdded;
         }
+        return 0;
     } catch (error) {
         console.error(`Failed to load resource at ${link}:`, error);
+        return 0;
     }
 };
 
@@ -281,7 +306,7 @@ const findNextPageSelector = async (page, pageCount, feedPageUrl) => {
 const saveMediaLinks = (mediaLinks, username) => {
     if (!username) {
         console.error('No username provided for saving media links');
-        return;
+        return 0;
     }
     
     const userDir = path.join(__dirname, '../build/users', username);
@@ -306,13 +331,14 @@ const saveMediaLinks = (mediaLinks, username) => {
     
     const updatedLinks = [...existingLinks, ...newLinks];
     fs.writeFileSync(filePath, JSON.stringify(updatedLinks, null, 2));
-    console.log('Media links saved to', filePath);
+    console.log(`Saved ${newLinks.length} new media links to ${filePath}`);
+    return newLinks.length; // Return number of new links added
 };
 
 const savePixivLinks = (pixivLinks, username, providedLink) => {
     if (!username) {
         console.error('No username provided for saving Pixiv links');
-        return;
+        return 0;
     }
     
     const userDir = path.join(__dirname, '../build/users', username);
@@ -340,7 +366,8 @@ const savePixivLinks = (pixivLinks, username, providedLink) => {
     
     const updatedLinks = [...existingLinks, ...newLinks];
     fs.writeFileSync(filePath, JSON.stringify(updatedLinks, null, 2));
-    console.log('Pixiv links saved to', filePath);
+    console.log(`Saved ${newLinks.length} new Pixiv links to ${filePath}`);
+    return newLinks.length; // Return number of new links added
 };
 
 const clearPixivLinks = () => {
@@ -387,7 +414,7 @@ const scrapeSavedLinks = async () => {
     return links; // Return the list of post links
 };
 
-const processPixivLink = async (page, link, feedPageUrl, username) => {
+const processPixivLink = async (page, link, feedPageUrl, username, progressCallback) => {
     try {
         const artworkId = link.match(/\/artworks\/(\d+)/)[1];
         const apiUrl = `https://www.phixiv.net/api/info?id=${artworkId}&language=en`;
@@ -400,19 +427,27 @@ const processPixivLink = async (page, link, feedPageUrl, username) => {
                 const mediaLink = { postLink: link, videoLinks: imageUrls };
                 console.log('Image URLs:', imageUrls);
 
-                if (feedPageUrl.includes("bookmark_new_illust_r18") || feedPageUrl.includes("illustrations") || feedPageUrl.includes("artworks")) {
-                    saveMediaLinks([mediaLink], username);
-                } else {
-                    savePixivLinks([mediaLink], username, feedPageUrl);
+                const linksAdded = feedPageUrl.includes("bookmark_new_illust_r18") || 
+                                 feedPageUrl.includes("illustrations") || 
+                                 feedPageUrl.includes("artworks")
+                    ? saveMediaLinks([mediaLink], username)
+                    : savePixivLinks([mediaLink], username, feedPageUrl);
+                
+                // Call progress callback after saving links
+                if (progressCallback) {
+                    progressCallback(linksAdded);
                 }
+                return linksAdded;
             }
         }
+        return 0;
     } catch (error) {
         console.error(`Failed to load resource at ${link}:`, error);
+        return 0;
     }
 };
 
-const collectPixivLinks = async (page, postLinksQueue, providedLink, username) => {
+const collectPixivLinks = async (page, postLinksQueue, providedLink, username, progressCallback) => {
     let feedPageUrl = providedLink || FEED_URL;
     let pageCount = 0;
     let existingLinks = [];
@@ -432,6 +467,8 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username) =
         const data = fs.readFileSync(LINKS_PATH, 'utf-8');
         allExistingLinks = JSON.parse(data);
     }
+
+    let totalAdded = 0;
 
     while (pageCount < PAGE_TARGET) {
         await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
@@ -465,7 +502,12 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username) =
             const link = postLinksQueue.shift();
             // Check if the link already exists in links.json
             if (!allExistingLinks.some(existingLink => existingLink.postLink === link)) {
-                await processPixivLink(page, link, feedPageUrl, username);
+                const newLinks = await processPixivLink(page, link, feedPageUrl, username, progressCallback);
+                totalAdded += newLinks;
+                // Call progress callback after each link is processed
+                if (progressCallback) {
+                    progressCallback(totalAdded);
+                }
             } else {
                 console.log(`Skipping duplicate link: ${link}`);
             }
@@ -486,6 +528,7 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username) =
         console.log(`New links added: ${uniqueNewPostLinks.length}`);
         console.log(`Total links count: ${postLinksQueue.length}`);
     }
+    return totalAdded;
 };
 
 module.exports = { scrapeVideos, scrapeSavedLinks};

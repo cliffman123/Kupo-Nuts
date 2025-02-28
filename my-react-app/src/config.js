@@ -1,12 +1,6 @@
 const config = {
-    apiBaseUrl: 'http://localhost:5000/api'
+  // Use environment variables or default to local development
+  API_URL: process.env.REACT_APP_API_URL || 'http://localhost:3001/api',
 };
 
-const axiosConfig = {
-    withCredentials: true,
-    headers: {
-        'Content-Type': 'application/json'
-    }
-};
-
-export { config as default, axiosConfig };
+export default config;

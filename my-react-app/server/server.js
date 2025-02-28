@@ -231,16 +231,22 @@ app.get('/api/profile', authenticateToken, (req, res) => {
 
 let isScraping = false; // Add a flag to indicate if scraping is in progress
 
+// Simplified scrape endpoint without WebSockets
 app.post('/api/scrape', authenticateToken, async (req, res) => {
     const { url } = req.body;
-    const username = req.user.username; // Get username from authenticated token
-   
+    const username = req.user.username;
+
     try {
         console.log(`Starting scrape for user ${username} with URL: ${url}`);
-        const postLinks = await scrapeVideos(url, null, username);
-        const linksAdded = postLinks.length;
-        console.log(`Scraping successful. Links added: ${linksAdded}`);
-        res.status(200).json({ message: 'Scraping successful', linksAdded });
+        
+        const result = await scrapeVideos(url, null, username);
+        
+        console.log('Scrape completed with result:', result);
+
+        res.status(200).json({
+            message: 'Scraping successful',
+            linksAdded: result.linksAdded,
+        });
     } catch (error) {
         console.error('Error scraping videos:', error);
         res.status(500).json({ message: 'Scraping failed', error: error.message });
@@ -248,7 +254,7 @@ app.post('/api/scrape', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/remove', authenticateToken, (req, res) => {
-    const { postLink, videoLink } = req.body;
+    const { postLink } = req.body;
     const filePath = getUserFilePath(req.user.username, 'links');
 
     try {
@@ -256,24 +262,8 @@ app.post('/api/remove', authenticateToken, (req, res) => {
         let data = fs.readFileSync(filePath, 'utf8');
         let links = JSON.parse(data);
 
-        // Filter the links array
-        links = links.map(link => {
-            if (link.postLink === postLink) {
-                // Handle both array and string cases for videoLinks
-                if (Array.isArray(link.videoLinks)) {
-                    link.videoLinks = link.videoLinks.filter(vl => vl !== videoLink);
-                } else if (link.videoLinks === videoLink) {
-                    link.videoLinks = [];
-                }
-            }
-            return link;
-        }).filter(link => {
-            // Remove any entries that have empty videoLinks
-            if (Array.isArray(link.videoLinks)) {
-                return link.videoLinks.length > 0;
-            }
-            return link.videoLinks && link.videoLinks.length > 0;
-        });
+        // Filter out the entire entry with matching postLink
+        links = links.filter(link => link.postLink !== postLink);
 
         // Write the updated links back to the file
         fs.writeFileSync(filePath, JSON.stringify(links, null, 2), 'utf8');
@@ -459,6 +449,28 @@ app.get('/api/media', authenticateToken, (req, res) => {
     });
 });
 
+// Add new endpoint to fetch just the latest media (for incremental updates)
+app.get('/api/media/latest', authenticateToken, (req, res) => {
+    const filePath = getUserFilePath(req.user.username, 'links');
+    const count = parseInt(req.query.count) || 10; // Default to 10 latest items
+    
+    if (!fs.existsSync(filePath)) {
+        return res.json([]);
+    }
+    
+    try {
+        const data = fs.readFileSync(filePath, 'utf8');
+        const links = JSON.parse(data);
+        // Return the latest `count` number of links (based on position in array)
+        const validLinks = links.filter(link => link && link.postLink && link.videoLinks);
+        const latestLinks = validLinks.slice(-count); // Get the most recent ones from the end
+        res.json(latestLinks);
+    } catch (error) {
+        console.error('Error fetching latest media:', error);
+        res.status(500).json({ error: 'Failed to fetch latest media' });
+    }
+});
+
 // Add new endpoints for import/export
 app.get('/api/export-links', authenticateToken, (req, res) => {
     const filePath = getUserFilePath(req.user.username, 'links');
@@ -521,50 +533,39 @@ app.post('/api/similar', authenticateToken, async (req, res) => {
     const username = req.user.username;
 
     try {
-        if (!url) {
-            throw new Error('URL is required');
-        }
+        // Get initial count
+        const userLinksPath = path.join(__dirname, '../build/users', username, 'links.json');
+        const initialCount = fs.existsSync(userLinksPath) ? 
+            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
 
-        // Add detailed logging
-        console.log('Similar Posts Request:', {
-            username: username,
-            requestUrl: url,
-            timestamp: new Date().toISOString()
-        });
-
-        // Directly pass URL to scrapeVideos
-        const postLinks = await scrapeVideos(url, null, username);
+        console.log(`Finding similar posts for user ${username} from post: ${url}`);
         
-        console.log('Scrape Results:', {
-            found: postLinks ? postLinks.length : 0,
-            url: url
-        });
+        // Pass the URL directly to scrapeVideos without trying to modify it
+        // The scraper will handle the appropriate URL format
+        await scrapeVideos(url, null, username);
+        
+        // Get final count
+        const finalCount = fs.existsSync(userLinksPath) ? 
+            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
+        
+        // Calculate new links added
+        const count = finalCount - initialCount;
 
-        if (!postLinks || postLinks.length === 0) {
-            return res.status(404).json({
-                message: 'No posts found',
-                url: url
+        if (count === 0) {
+            return res.status(200).json({
+                message: 'No new similar posts found',
+                count: 0
             });
         }
 
         res.status(200).json({ 
-            message: 'Posts found successfully', 
-            count: postLinks.length,
-            url: url
+            message: 'Similar posts found successfully', 
+            count 
         });
     } catch (error) {
-        // Enhanced error logging
-        console.error('Similar Posts Error:', {
-            error: error.message,
-            stack: error.stack,
-            url: url,
-            username: username
-        });
-
+        console.error('Error finding similar posts:', error);
         res.status(500).json({ 
-            message: 'Failed to process URL',
-            error: error.message,
-            url: url
+            message: error.message || 'Failed to find similar posts'
         });
     }
 });

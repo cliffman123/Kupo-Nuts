@@ -3,8 +3,9 @@ import Masonry from 'react-masonry-css';
 import './VideoList.css';
 import JSZip from 'jszip';
 import defaultLinks from './default-links.json';
+import config from '../config'; // Import the config file
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_URL = config.API_URL;
 
 const VideoList = () => {
     const [mediaUrls, setMediaUrls] = useState([]);
@@ -16,7 +17,7 @@ const VideoList = () => {
     const [autoScroll, setAutoScroll] = useState(!isLoggedIn);
     const [filter, setFilter] = useState('default');
     const [showSettings, setShowSettings] = useState(false);
-    const [notification, setNotification] = useState(null);
+    const [notifications, setNotifications] = useState([]);
     const [showLogin, setShowLogin] = useState(false);
     const [isRegistering, setIsRegistering] = useState(false);
     const [username, setUsername] = useState('');
@@ -31,6 +32,7 @@ const VideoList = () => {
     });
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [isClickable, setIsClickable] = useState(true);
+    const [loadedMedia, setLoadedMedia] = useState({});
     const mediaRefs = useRef([]);
     const mediaSet = useRef(new Set());
     const observer = useRef();
@@ -151,19 +153,66 @@ const VideoList = () => {
     };
 
     const showNotification = (message, type = 'info') => {
-        setNotification({ message, type });
-        setTimeout(() => setNotification(null), 3000);
+        const id = Date.now(); // Create unique ID for each notification
+        const newNotification = { id, message, type };
+        
+        setNotifications(prev => [...prev, newNotification]);
+        
+        // Remove this specific notification after 3 seconds
+        setTimeout(() => {
+            setNotifications(prev => prev.filter(notification => notification.id !== id));
+        }, 3000);
     };
 
-    const handleScrape = async () => {
+    const showProgressNotification = (id, message, count = 0, isComplete = false) => {
+        console.log('Showing progress notification:', { id, message, count, isComplete });
+        
+        setNotifications(prev => {
+            const existing = prev.find(n => n.id === id);
+            const updatedNotifications = existing 
+                ? prev.map(n => n.id === id ? { ...n, message, count, isComplete } : n)
+                : [...prev, { id, message, type: 'progress', count, isComplete }];
+            
+            return updatedNotifications;
+        });
+    };
+
+    const removeNotification = (id) => {
+        setNotifications(prev => prev.filter(n => n.id !== id));
+    };
+
+    // New helper function to fetch only the latest added media
+    const fetchLatestMedia = async (count = 10) => {
         try {
-            showNotification('Starting scrape...', 'info');
+            const response = await fetch(`${API_URL}/api/media/latest?count=${count}`, {
+                ...fetchConfig,
+                cache: 'no-cache'
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to fetch latest media');
+            }
+            
+            const data = await response.json();
+            return data.map(item => [item.postLink || '', item.videoLinks]);
+        } catch (error) {
+            console.error('Error fetching latest media:', error);
+            return [];
+        }
+    };
+
+    // Updated handleScrape function
+    const handleScrape = async () => {
+        const notificationId = Date.now();
+        try {
+            // Show initial "in progress" notification without count
+            showProgressNotification(notificationId, 'Scraping in progress...', 0, false);
             console.log('Scraping URL:', scrapeUrl);
+            
             const response = await fetch(`${API_URL}/api/scrape`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json',
-                    // Add credentials header if needed
                     'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
                 },
                 ...fetchConfig,
@@ -176,19 +225,43 @@ const VideoList = () => {
                     setShowLogin(true);
                     throw new Error('Please login to scrape media');
                 }
-                const errorText = await response.text();
-                console.error('Network response was not ok:', errorText);
-                showNotification('Failed to scrape. Please try again.', 'error');
                 throw new Error('Network response was not ok');
             }
-            showNotification('Scraping completed successfully! Please refresh.', 'success');
+
+            const result = await response.json();
+            
+            // Update notification with final count when complete and mark as complete
+            showProgressNotification(notificationId, 'Scraping completed successfully!', result.linksAdded || 0, true);
+            
+            // Handle media updates based on current sort
+            if (filter.toLowerCase() === 'newest') {
+                // Refresh the entire media list for "newest" sort
+                setCurrentPage(1);
+                setMediaUrls([]);
+                await fetchMedia(1, initialMediaPerPage);
+            } else if (result.linksAdded > 0) {
+                // For other sorts, append new media to the end of the current list
+                const latestMedia = await fetchLatestMedia(result.linksAdded);
+                
+                // Add only unique media that isn't already in our list
+                const existingUrls = new Set(mediaUrls.map(media => media[0]));
+                const uniqueNewMedia = latestMedia.filter(media => !existingUrls.has(media[0]));
+                
+                if (uniqueNewMedia.length > 0) {
+                    setMediaUrls(prevMediaUrls => [...prevMediaUrls, ...uniqueNewMedia]);
+                }
+            }
+            
+            // Auto-remove notification after a few seconds
+            setTimeout(() => removeNotification(notificationId), 5000);
         } catch (error) {
             console.error('Failed to scrape:', error);
             showNotification(error.message || 'Failed to scrape. Please try again.', 'error');
+            removeNotification(notificationId);
         }
     };
 
-    const handleRemove = async (postLink, videoLink) => {
+    const handleRemove = async (postLink) => {
         try {
             const response = await fetch(`${API_URL}/api/remove`, {
                 method: 'POST',
@@ -196,29 +269,16 @@ const VideoList = () => {
                     'Content-Type': 'application/json',
                 },
                 ...fetchConfig,
-                body: JSON.stringify({ postLink, videoLink }),
+                body: JSON.stringify({ postLink }),
             });
 
             if (!response.ok) {
                 throw new Error('Failed to remove media');
             }
 
-            // Update the local state to remove the media
+            // Update the local state to remove the entire post
             setMediaUrls(prevMediaUrls => 
-                prevMediaUrls.filter(media => {
-                    // If this is the post we want to modify
-                    if (media[0] === postLink) {
-                        // If media[1] is an array, filter out the specific videoLink
-                        if (Array.isArray(media[1])) {
-                            const remainingVideos = media[1].filter(vl => vl !== videoLink);
-                            // Only keep this post if it has remaining videos
-                            return remainingVideos.length > 0;
-                        }
-                        // If media[1] is a single string, remove the post if it matches
-                        return media[1] !== videoLink;
-                    }
-                    return true;
-                })
+                prevMediaUrls.filter(media => media[0] !== postLink)
             );
 
             showNotification('Media removed successfully', 'success');
@@ -269,28 +329,58 @@ const VideoList = () => {
         }
     };
 
+    // Updated handleSimilar function
     const handleSimilar = async (postLink) => {
+        const notificationId = Date.now();
         try {
-            showNotification('Searching for similar posts...', 'info');
+            // Show initial notification without count
+            showProgressNotification(notificationId, 'Searching for similar posts...', 0, false);
+            console.log('Finding similar posts for:', postLink);
+            
             const response = await fetch(`${API_URL}/api/similar`, {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
                 ...fetchConfig,
                 body: JSON.stringify({ url: postLink }),
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.message || 'Failed to find similar posts');
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || 'Failed to find similar posts');
             }
 
-            await fetchMedia(1, initialMediaPerPage); // Refresh media after finding similar
-            showNotification('Similar posts found! Refreshing gallery...', 'success');
+            const result = await response.json();
+            
+            if (result.count === 0) {
+                showProgressNotification(notificationId, 'No similar posts found', 0, true);
+            } else {
+                showProgressNotification(notificationId, 'Similar posts found!', result.count, true);
+                
+                // Handle media updates based on current sort
+                if (filter.toLowerCase() === 'newest') {
+                    // Refresh the entire media list for "newest" sort
+                    setCurrentPage(1);
+                    setMediaUrls([]);
+                    await fetchMedia(1, initialMediaPerPage);
+                } else if (result.count > 0) {
+                    // For other sorts, append new media to the end of the current list
+                    const latestMedia = await fetchLatestMedia(result.count);
+                    
+                    // Add only unique media that isn't already in our list
+                    const existingUrls = new Set(mediaUrls.map(media => media[0]));
+                    const uniqueNewMedia = latestMedia.filter(media => !existingUrls.has(media[0]));
+                    
+                    if (uniqueNewMedia.length > 0) {
+                        setMediaUrls(prevMediaUrls => [...prevMediaUrls, ...uniqueNewMedia]);
+                    }
+                }
+            }
+            
+            setTimeout(() => removeNotification(notificationId), 3000);
         } catch (error) {
             console.error('Failed to find similar:', error);
             showNotification(error.message || 'Failed to find similar posts', 'error');
+            removeNotification(notificationId);
         }
     };
 
@@ -588,6 +678,14 @@ const VideoList = () => {
             });
             setIsLoggedIn(false);
             showNotification('Logged out successfully', 'success');
+            
+            // Close profile menu
+            setShowProfileMenu(false);
+            
+            // Short timeout to allow notification to appear before refresh
+            setTimeout(() => {
+                window.location.reload(); // Refresh the page
+            }, 1000);
         } catch (error) {
             showNotification('Logout failed', 'error');
         }
@@ -705,7 +803,7 @@ const VideoList = () => {
                 const url = window.URL.createObjectURL(content);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'media-export.zip';
+                a.download = 'KupoNutEX.zip';
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
@@ -822,14 +920,46 @@ const VideoList = () => {
         event.target.value = '';
     };
 
+    // Add function to mark media as loaded
+    const handleMediaLoad = (index) => {
+        setLoadedMedia(prev => ({
+            ...prev,
+            [index]: true
+        }));
+    };
+
     return (
         <div>
-            {notification && (
-                <div className={`notification ${notification.type}`}>
-                    <p className="notification-message">{notification.message}</p>
-                    <div className="notification-progress"></div>
-                </div>
-            )}
+            <div className="notifications-container">
+                {notifications.map((notification, index) => (
+                    <div 
+                        key={notification.id} 
+                        className={`notification ${notification.type}`}
+                        style={{ top: `${20 + (index * 70)}px` }}
+                    >
+                        <p className="notification-message">{notification.message}</p>
+                        {notification.type === 'progress' && notification.isComplete && (
+                            <>
+                                <p className="notification-count">
+                                    {notification.count} items found
+                                </p>
+                                <div 
+                                    className="notification-progress-bar" 
+                                    style={{ width: '100%' }}
+                                />
+                            </>
+                        )}
+                        {notification.type === 'progress' && !notification.isComplete && (
+                            <div className="notification-loading">
+                                <div className="notification-spinner"></div>
+                            </div>
+                        )}
+                        {notification.type !== 'progress' && (
+                            <div className="notification-progress" />
+                        )}
+                    </div>
+                ))}
+            </div>
             <div className="main-content">
                 <Masonry
                     breakpointCols={breakpointColumnsObj}
@@ -843,6 +973,7 @@ const VideoList = () => {
                         const isVideo = firstVideoLink && (firstVideoLink.endsWith('.mp4') || firstVideoLink.endsWith('.mov') || firstVideoLink.endsWith('.webm'));
                         const isRule34Video = postLink.includes('rule34video');
                         const embedUrl = firstVideoLink ? firstVideoLink.replace('/view/', '/embed/') : '';
+                        const isLoaded = loadedMedia[index];
 
                         return (
                             <div
@@ -851,7 +982,7 @@ const VideoList = () => {
                                 className={`media-wrapper masonry-item ${fullscreenMedia === index ? 'fullscreen' : ''}`}
                                 onClick={() => handleMediaClick(index)}
                             >
-                                <div className="media-container">
+                                <div className={`media-container ${isLoaded ? 'media-loaded' : 'media-loading'}`}>
                                     {isRule34Video ? (
                                         <iframe
                                             className="media-container"
@@ -860,6 +991,7 @@ const VideoList = () => {
                                             allowFullScreen
                                             loop
                                             title="Embedded Video"
+                                            onLoad={() => handleMediaLoad(index)}
                                         ></iframe>
                                     ) : isVideo ? (
                                         <video
@@ -868,6 +1000,7 @@ const VideoList = () => {
                                             controls
                                             muted={fullscreenMedia !== index}
                                             loop
+                                            onLoadedData={() => handleMediaLoad(index)}
                                             onError={(e) => handleVideoError(e, firstVideoLink)}
                                             onLoadStart={() => {
                                                 setCookies();
@@ -878,6 +1011,7 @@ const VideoList = () => {
                                             ref={el => mediaRefs.current[index] = el}
                                             src={firstVideoLink}
                                             alt="Media"
+                                            onLoad={() => handleMediaLoad(index)}
                                             onError={(e) => handleImageError(e, firstVideoLink, index)}
                                         />
                                     )}
@@ -934,7 +1068,7 @@ const VideoList = () => {
                                         className="remove-icon"
                                         onClick={(e) => {
                                             e.stopPropagation();
-                                            handleRemove(postLink, firstVideoLink); // Pass the specific video link
+                                            handleRemove(postLink); // Now we just pass postLink, not the specific videoLink
                                         }}
                                         aria-label="Remove media"
                                     >
