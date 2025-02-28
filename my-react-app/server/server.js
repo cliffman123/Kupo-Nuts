@@ -12,7 +12,7 @@ const { scrapeVideos } = require('./scraper');
 const axios = require('axios'); // Add this line to import axios
 
 const app = express();
-const PORT = process.env.PORT || 5000; // Change port to 5000
+const PORT = process.env.PORT || 5000; // Change port to 5000m 3000 to 5000
 
 const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
@@ -29,9 +29,9 @@ app.use(session({
     }
 }));
 
-// Update CORS configuration to support ngrok
+// Update CORS configuration to support GitHub Pages
 app.use(cors({
-    origin: 'http://localhost:3000',
+    origin: ['http://localhost:3000', 'http://localhost:5000', 'https://cliffman123.github.io'],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']

@@ -1,6 +1,9 @@
+const isProduction = window.location.hostname !== 'localhost';
+
 const config = {
-  // Use environment variables or default to local development
-  API_URL: process.env.REACT_APP_API_URL || 'http://localhost:3001/api',
+  API_URL: isProduction 
+    ? 'https://your-deployed-server.com' // Replace with your actual deployed server URL
+    : 'http://localhost:5000'
 };
 
 export default config;
