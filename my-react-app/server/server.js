@@ -29,13 +29,31 @@ app.use(session({
     }
 }));
 
-// Update CORS configuration to support GitHub Pages
-app.use(cors({
-    origin: ['http://localhost:3000', 'http://localhost:5000', 'https://cliffman123.github.io'],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
-}));
+// Update CORS configuration to support GitHub Pages and credentials
+app.use((req, res, next) => {
+    // Get the origin from request headers
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+        'http://localhost:3000', 
+        'http://localhost:5000', 
+        'https://cliffman123.github.io'
+    ];
+    
+    // Set CORS headers based on origin
+    if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+    }
+    
+    // Handle preflight OPTIONS requests
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+    }
+    
+    next();
+});
 
 app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
