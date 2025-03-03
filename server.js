@@ -3,6 +3,23 @@
 
 console.log('Starting server from root forwarding file');
 console.log('Current directory:', process.cwd());
+console.log('Node modules available:', require('fs').existsSync('./node_modules'));
 
-// Import and run the actual server implementation
-require('./my-react-app/server/server.js');
+// Make all dependencies available from the root level
+require('cors');
+require('express');
+require('body-parser');
+require('axios');
+require('bcrypt');
+require('cookie-parser');
+require('dotenv').config();
+require('express-session');
+require('jsonwebtoken');
+
+try {
+  // Import and run the actual server implementation
+  require('./my-react-app/server/server.js');
+} catch (error) {
+  console.error('Error loading server implementation:', error);
+  process.exit(1);
+}
