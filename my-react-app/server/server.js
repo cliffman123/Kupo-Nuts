@@ -29,13 +29,32 @@ app.use(session({
     }
 }));
 
-// Configure CORS for production
-app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? 'https://cliffman123.github.io/Kupo-Nuts/' // Updated with likely GitHub Pages URL
-    : 'http://localhost:3000',
-  credentials: true
-}));
+// Update CORS configuration to support GitHub Pages and credentials
+app.use((req, res, next) => {
+    // Get the origin from request headers
+    const origin = req.headers.origin;
+    const allowedOrigins = [
+        'http://localhost:3000', 
+        'http://localhost:5000', 
+        'https://cliffman123.github.io',
+        'https://cliffman123.github.io/Kupo-Nuts/' // Update with your actual GitHub Pages URL
+    ];
+    
+    // Set CORS headers based on origin
+    if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
+        res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+    }
+    
+    // Handle preflight OPTIONS requests
+    if (req.method === 'OPTIONS') {
+        return res.sendStatus(204);
+    }
+    
+    next();
+});
 
 app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
@@ -635,7 +654,20 @@ const clearUserData = () => {
 // Clear user data when server starts
 clearUserData();
 
-console.log(`Server starting on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
+// For production on Render, ensure cookies work properly
+if (process.env.NODE_ENV === 'production') {
+    app.use(session({
+        secret: process.env.SESSION_SECRET || 'your-secret-key',
+        resave: false,
+        saveUninitialized: false,
+        cookie: {
+            secure: true, // Use true in production with HTTPS
+            sameSite: 'none', // Required for cross-site cookies
+            maxAge: 24 * 60 * 60 * 1000 // 24 hours
+        }
+    }));
+}
+
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Server is running on port ${PORT}`);
 });
