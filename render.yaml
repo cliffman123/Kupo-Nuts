@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: kupo-nuts-backend
+    name: kupo-nuts-api
     env: node
     buildCommand: npm install
     startCommand: node server.js
