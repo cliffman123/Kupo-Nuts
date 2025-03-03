@@ -11,6 +11,10 @@ const cookieParser = require('cookie-parser');
 const { scrapeVideos } = require('./scraper');
 const axios = require('axios'); // Add this line to import axios
 
+// Add this near the top of your server.js file
+console.log('Current directory:', process.cwd());
+console.log('Files in current directory:', require('fs').readdirSync('.'));
+
 const app = express();
 const PORT = process.env.PORT || 5000; // Change port to 5000m 3000 to 5000
 
