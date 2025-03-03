@@ -3,7 +3,8 @@ services:
     name: kupo-nuts-api
     env: node
     buildCommand: npm install
-    startCommand: node server.js
+    startCommand: node index.js
+    rootDir: .
     envVars:
       - key: NODE_ENV
         value: production
@@ -15,3 +16,4 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
+
