@@ -6,15 +6,29 @@ console.log('Current directory:', process.cwd());
 console.log('Node modules available:', require('fs').existsSync('./node_modules'));
 
 // Make all dependencies available from the root level
-require('cors');
+require('dotenv').config();
 require('express');
 require('body-parser');
+require('cors');
 require('axios');
 require('bcrypt');
 require('cookie-parser');
-require('dotenv').config();
 require('express-session');
 require('jsonwebtoken');
+require('fs');
+require('path');
+
+// Load puppeteer and related dependencies
+try {
+  console.log('Pre-loading puppeteer dependencies...');
+  require('puppeteer');
+  require('puppeteer-extra');
+  require('puppeteer-extra-plugin-stealth');
+  require('puppeteer-extra-plugin-adblocker');
+  console.log('Puppeteer dependencies loaded successfully');
+} catch (error) {
+  console.error('Failed to load puppeteer dependencies:', error.message);
+}
 
 try {
   // Import and run the actual server implementation
