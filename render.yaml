@@ -2,9 +2,8 @@ services:
   - type: web
     name: kupo-nuts-backend
     runtime: node
-    rootDir: my-react-app/server
-    buildCommand: npm install
-    startCommand: node server.js
+    buildCommand: cd my-react-app/server && npm install
+    startCommand: node my-react-app/server/server.js
     envVars:
       - key: NODE_ENV
         value: production
