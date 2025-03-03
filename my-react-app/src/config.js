@@ -5,6 +5,7 @@ const DEFAULT_NGROK_URL = ' https://9200-2600-4040-441b-5e00-8534-daac-9f21-baa.
 const ngrokUrl = localStorage.getItem('ngrokUrl') || DEFAULT_NGROK_URL;
 
 const config = {
+<<<<<<< Updated upstream
   // Always use ngrok URL
   API_URL: ngrokUrl
 };
@@ -27,6 +28,11 @@ export const updateNgrokUrl = (url) => {
 export const resetToDefaultNgrok = () => {
   localStorage.setItem('ngrokUrl', DEFAULT_NGROK_URL);
   console.log('Reset to default ngrok URL. Please refresh the page.');
+=======
+  API_URL: process.env.NODE_ENV === 'production' 
+    ? 'https://your-backend-name.onrender.com' // Your Render web service URL
+    : 'http://localhost:5000'
+>>>>>>> Stashed changes
 };
 
 export default config;
