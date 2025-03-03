@@ -1,9 +1,9 @@
 {
   "files": {
     "main.css": "/Kupo-Nuts/static/css/main.d44622f6.css",
-    "main.js": "/Kupo-Nuts/static/js/main.3804c096.js",
+    "main.js": "/Kupo-Nuts/static/js/main.006dd1d3.js",
     "static/css/415.4cf475d1.chunk.css": "/Kupo-Nuts/static/css/415.4cf475d1.chunk.css",
-    "static/js/415.83751499.chunk.js": "/Kupo-Nuts/static/js/415.83751499.chunk.js",
+    "static/js/415.c96ae24c.chunk.js": "/Kupo-Nuts/static/js/415.c96ae24c.chunk.js",
     "static/js/559.4a4d5190.chunk.js": "/Kupo-Nuts/static/js/559.4a4d5190.chunk.js",
     "static/media/fa-solid-900.ttf": "/Kupo-Nuts/static/media/fa-solid-900.2582b0e4bcf85eceead0.ttf",
     "static/media/fa-brands-400.ttf": "/Kupo-Nuts/static/media/fa-brands-400.1815e00441357e01619e.ttf",
@@ -15,13 +15,13 @@
     "static/media/fa-v4compatibility.woff2": "/Kupo-Nuts/static/media/fa-v4compatibility.ea8f94e1d22e0d35ccd4.woff2",
     "index.html": "/Kupo-Nuts/index.html",
     "main.d44622f6.css.map": "/Kupo-Nuts/static/css/main.d44622f6.css.map",
-    "main.3804c096.js.map": "/Kupo-Nuts/static/js/main.3804c096.js.map",
+    "main.006dd1d3.js.map": "/Kupo-Nuts/static/js/main.006dd1d3.js.map",
     "415.4cf475d1.chunk.css.map": "/Kupo-Nuts/static/css/415.4cf475d1.chunk.css.map",
-    "415.83751499.chunk.js.map": "/Kupo-Nuts/static/js/415.83751499.chunk.js.map",
+    "415.c96ae24c.chunk.js.map": "/Kupo-Nuts/static/js/415.c96ae24c.chunk.js.map",
     "559.4a4d5190.chunk.js.map": "/Kupo-Nuts/static/js/559.4a4d5190.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.d44622f6.css",
-    "static/js/main.3804c096.js"
+    "static/js/main.006dd1d3.js"
   ]
 }
