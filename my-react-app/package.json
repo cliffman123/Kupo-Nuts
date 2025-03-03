@@ -1,7 +1,6 @@
 {
-  "name": "my-react-app",
+  "name": "kupo-nuts-frontend",
   "version": "1.0.0",
-  "private": true,
   "homepage": "https://cliffman123.github.io/Kupo-Nuts",
   "scripts": {
     "start": "react-scripts start",
@@ -14,6 +13,9 @@
     "vercel-build": "npm install --legacy-peer-deps && npm run build"
   },
   "dependencies": {
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2",
+    "react-scripts": "5.0.1",
     "@craco/craco": "^7.1.0",
     "@fortawesome/fontawesome-free": "^6.7.2",
     "@jridgewell/sourcemap-codec": "^1.4.15",
@@ -42,11 +44,8 @@
     "puppeteer-core": "^23.11.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
     "react-lazyload": "^3.2.1",
     "react-masonry-css": "^1.0.16",
-    "react-scripts": "5.0.1",
     "react-virtualized": "^9.22.6",
     "react-window": "^1.8.11",
     "stream-browserify": "^3.0.0",

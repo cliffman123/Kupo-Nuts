@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: kupo-nuts-backend
+    env: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+  - type: static
+    name: kupo-nuts-frontend
+    buildCommand: cd my-react-app && npm install && npm run build
+    publishDir: my-react-app/build
+    envVars:
+      - key: NODE_ENV
+        value: production

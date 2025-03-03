@@ -44,6 +44,30 @@
    # Update this before running npm run deploy
    ```
 
+## Deployment Instructions for Render
+
+### Frontend (Static Site)
+1. Log in to Render and create a new Static Site
+2. Connect to your GitHub repository
+3. Configure the build:
+   - Root Directory: `my-react-app`
+   - Build Command: `npm install && npm run build`
+   - Publish Directory: `build`
+
+### Backend (Web Service)
+1. Create a new Web Service
+2. Connect to the same GitHub repository
+3. Configure the service:
+   - Build Command: `npm install`
+   - Start Command: `node server.js`
+
+### Environment Variables
+Make sure to set these in both services:
+- `NODE_ENV`: `production`
+
+The frontend will be available at `https://kupo-nuts-frontend.onrender.com`
+The backend will be available at `https://kupo-nuts-backend.onrender.com`
+
 ## Important Notes
 
 - The ngrok URL changes every time you restart ngrok unless you have a paid account
