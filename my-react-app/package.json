@@ -10,7 +10,7 @@
     "serve": "serve -s build",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d build",
-    "vercel-build": "npm install --legacy-peer-deps && npm run build"
+    "install-all": "cd .. && npm run install-all"
   },
   "dependencies": {
     "@craco/craco": "^7.1.0",

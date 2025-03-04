@@ -2,12 +2,18 @@ services:
   - type: web
     name: kupo-nuts-api
     env: node
-    buildCommand: npm install
+    buildCommand: npm run install-all
     startCommand: node my-react-app/server/server.js
     rootDir: .
     envVars:
       - key: NODE_ENV
         value: production
+      - key: PORT
+        value: "10000" 
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
 
   - type: static
     name: kupo-nuts-frontend
