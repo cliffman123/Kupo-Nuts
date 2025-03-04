@@ -41,7 +41,9 @@ app.use((req, res, next) => {
         'http://localhost:3000', 
         'http://localhost:5000', 
         'https://cliffman123.github.io',
-        'https://cliffman123.github.io/Kupo-Nuts/' // Update with your actual GitHub Pages URL
+        'https://cliffman123.github.io/Kupo-Nuts', // Without trailing slash
+        'https://cliffman123.github.io/Kupo-Nuts/', // With trailing slash
+        'https://kupo-nuts-frontend.onrender.com'  // Add your frontend Render URL
     ];
     
     // Set CORS headers based on origin
@@ -633,12 +635,21 @@ app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../build')));
 
-// Catch-all route to serve index.html for any other routes
+// Add a root endpoint
+app.get('/', (req, res) => {
+    res.send({
+        status: 'online',
+        message: 'Kupo-Nuts API server is running',
+        endpoints: ['/api/login', '/api/register', '/api/media', '/api/profile']
+    });
+});
+
+// Fix the catch-all route - there appears to be corruption in this section
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../build', 'index.html'));
 });
 
-// Add this function before app.listen()
+// Fix the clearUserData function - there appears to be corruption in this section
 const clearUserData = () => {
     const buildDir = path.join(__dirname, '../build');
     const usersDir = path.join(buildDir, 'users');
