@@ -188,6 +188,7 @@ app.post('/api/register', validatePassword, async (req, res) => {
     }
 });
 
+// Update cookie settings for cross-domain access with GitHub Pages
 app.post('/api/login', checkLoginAttempts, async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -227,11 +228,11 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        // Set token in cookie with updated settings
+        // Set token in cookie with updated settings for cross-site functionality
         res.cookie('token', token, {
             httpOnly: true,
-            secure: false, // Set to false for local HTTP
-            sameSite: 'lax', // Required for ngrok
+            secure: process.env.NODE_ENV === 'production', // true in production
+            sameSite: 'none', // Required for cross-site cookies
             path: '/',
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
         });
