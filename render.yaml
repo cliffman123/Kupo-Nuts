@@ -3,7 +3,7 @@ services:
     name: kupo-nuts-api
     env: node
     buildCommand: npm install
-    startCommand: node server.js
+    startCommand: node my-react-app/server/server.js
     rootDir: .
     envVars:
       - key: NODE_ENV
