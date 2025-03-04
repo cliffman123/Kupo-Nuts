@@ -13,21 +13,6 @@ try {
   require('express');
   require('body-parser');
   require('axios');
-  
-  // Special handling for bcrypt
-  try {
-    console.log('Loading bcrypt...');
-    if (process.env.RENDER_PLATFORM) {
-      console.log('Running on Render platform, using bcrypt from scratch');
-      // This will ensure bcrypt is loaded from the Linux-compatible version
-    }
-    require('bcrypt');
-    console.log('bcrypt loaded successfully');
-  } catch (bcryptError) {
-    console.error('Error loading bcrypt:', bcryptError);
-    process.exit(1);
-  }
-  
   require('cookie-parser');
   require('dotenv').config();
   require('express-session');
