@@ -15,7 +15,7 @@ const VideoList = () => {
     const [loading, setLoading] = useState(false);
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [autoScroll, setAutoScroll] = useState(!isLoggedIn);
-    const [filter, setFilter] = useState('default');
+    const [filter, setFilter] = useState('random'); // Default to random for non-logged in users
     const [showSettings, setShowSettings] = useState(false);
     const [notifications, setNotifications] = useState([]);
     const [showLogin, setShowLogin] = useState(false);
@@ -33,22 +33,27 @@ const VideoList = () => {
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [isClickable, setIsClickable] = useState(true);
     const [loadedMedia, setLoadedMedia] = useState({});
+    const [reachedEnd, setReachedEnd] = useState(false);
+    const [randomSeed, setRandomSeed] = useState(Date.now());
     const mediaRefs = useRef([]);
     const mediaSet = useRef(new Set());
     const observer = useRef();
 
     const initialMediaPerPage = 8;
     const mediaPerPage = 16;
+    const minMediaForReset = 40; // Minimum media count required for the infinite loop behavior
 
-    const shuffleArray = (array) => {
-        array.reverse();
-        for (let i = array.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [array[i], array[j]] = [array[j], array[i]];
+    const shuffleArray = useCallback((array) => {
+        const newArray = [...array];
+        newArray.reverse();
+        const rand = seedrandom(randomSeed.toString());
+        for (let i = newArray.length - 1; i > 0; i--) {
+            const j = Math.floor(rand() * (i + 1));
+            [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
         }
-        array.reverse();
-        return array;
-    };
+        newArray.reverse();
+        return newArray;
+    }, [randomSeed]);
 
     const fetchConfig = {
         credentials: 'include',
@@ -88,7 +93,26 @@ const VideoList = () => {
                 mediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks]);
             }
 
-            // Prepare arrays before switch
+            const totalAvailableItems = mediaLinks.length;
+            const startIndex = (page - 1) * limit;
+            
+            // Only consider "reached end" logic if we have enough media items
+            const hasEnoughMedia = totalAvailableItems >= minMediaForReset;
+            
+            if (startIndex >= totalAvailableItems) {
+                if (hasEnoughMedia && !reachedEnd) {
+                    setReachedEnd(true);
+                    showNotification("Reached the end! Showing content in a new random order", "info");
+                    setRandomSeed(Date.now());
+                    setCurrentPage(1);
+                    setMediaUrls([]);
+                    await fetchMedia(1, initialMediaPerPage);
+                    return;
+                }
+            } else {
+                setReachedEnd(false);
+            }
+
             let sortedMediaLinks;
             const shuffledLinks = shuffleArray([...mediaLinks]);
             const reversedLinks = [...mediaLinks].reverse();
@@ -105,9 +129,20 @@ const VideoList = () => {
                     break;
             }
 
-            const startIndex = (page - 1) * limit;
-            const endIndex = startIndex + limit;
+            const endIndex = Math.min(startIndex + limit, totalAvailableItems);
             const newMediaUrls = sortedMediaLinks.slice(startIndex, endIndex);
+
+            if (newMediaUrls.length === 0 && page > 1) {
+                if (hasEnoughMedia && !reachedEnd) {
+                    setReachedEnd(true);
+                    showNotification("Reached the end! Showing content in a new random order", "info");
+                    setRandomSeed(Date.now());
+                    setCurrentPage(1);
+                    setMediaUrls([]);
+                    await fetchMedia(1, initialMediaPerPage);
+                }
+                return;
+            }
 
             if (page === 1) {
                 mediaSet.current.clear(); // Clear mediaSet before setting new media URLs
@@ -127,7 +162,7 @@ const VideoList = () => {
         } finally {
             setLoading(false);
         }
-    }, [filter, isLoggedIn]);
+    }, [filter, isLoggedIn, reachedEnd, randomSeed, initialMediaPerPage, shuffleArray]);
 
     const setCookies = () => {
         const cookies = JSON.parse(localStorage.getItem('cookies'));
@@ -525,6 +560,29 @@ const VideoList = () => {
         }
     }, [autoScroll, fullscreenMedia]);
 
+    useEffect(() => {
+        setReachedEnd(false);
+        setRandomSeed(Date.now());
+    }, [filter]);
+
+    useEffect(() => {
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js';
+        script.async = true;
+        document.body.appendChild(script);
+
+        return () => {
+            document.body.removeChild(script);
+        };
+    }, []);
+
+    const seedrandom = (seed) => {
+        if (window.Math.seedrandom) {
+            return new window.Math.seedrandom(seed);
+        }
+        return () => Math.random();
+    };
+
     const selectedMedia = useMemo(() => {
         const startIndex = (currentPage - 1) * mediaPerPage;
         return mediaUrls.slice(0, startIndex + (2 * mediaPerPage));
@@ -632,7 +690,11 @@ const VideoList = () => {
             setUsername('');
             setPassword('');
             
-            // Add this: Reset page and fetch media after successful login
+            // Load saved filter preference after login
+            const savedFilter = getFilterFromCookie();
+            setFilter(savedFilter);
+            
+            // Reset page and fetch media after successful login
             setCurrentPage(1);
             setMediaUrls([]);
             await fetchMedia(1, initialMediaPerPage);
@@ -677,6 +739,7 @@ const VideoList = () => {
                 ...fetchConfig,
             });
             setIsLoggedIn(false);
+            setFilter('random'); // Set filter to random when logging out
             showNotification('Logged out successfully', 'success');
             
             // Close profile menu
@@ -721,11 +784,13 @@ const VideoList = () => {
                     await fetchMedia(1, initialMediaPerPage);
                 } else {
                     setIsLoggedIn(false);
+                    setFilter('random'); // Explicitly set filter to random for non-logged in users
                     setShowLogin(true);
                 }
             } catch (error) {
                 console.error('Error checking login status:', error);
                 setIsLoggedIn(false);
+                setFilter('random'); // Set filter to random here too in case of error
                 setShowLogin(true);
             }
         };
