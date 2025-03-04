@@ -4,7 +4,8 @@ const bodyParser = require('body-parser');
 const cors = require('cors'); // Import the cors middleware
 const fs = require('fs');
 const path = require('path');
-const bcrypt = require('bcrypt');
+// Replace bcrypt with our password utilities
+const passwordUtils = require('./passwordUtils');
 const jwt = require('jsonwebtoken');
 const session = require('express-session');
 const cookieParser = require('cookie-parser');
@@ -170,7 +171,8 @@ app.post('/api/register', validatePassword, async (req, res) => {
             return res.status(409).json({ message: 'Username already exists' });
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // Use passwordUtils.hash instead of bcrypt
+        const hashedPassword = await passwordUtils.hash(password);
         users[username] = {
             password: hashedPassword,
             createdAt: new Date()
@@ -208,7 +210,8 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             return res.status(401).json({ message: 'Invalid username or password' });
         }
 
-        const validPassword = await bcrypt.compare(password, user.password);
+        // Use passwordUtils.compare instead of bcrypt
+        const validPassword = await passwordUtils.compare(password, user.password);
         if (!validPassword) {
             loginAttempts[ip].attempts++;
             loginAttempts[ip].lastAttempt = Date.now();
