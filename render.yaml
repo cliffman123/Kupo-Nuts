@@ -1,14 +1,11 @@
 services:
   - type: web
-    name: kupo-nuts
+    name: kupo-nuts-api
     env: node
-    buildCommand: npm install && node node_modules/puppeteer/install.js
-    startCommand: npm start
+    buildCommand: npm run install-all
+    startCommand: node my-react-app/server/server.js
+    rootDir: .
     envVars:
-      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: "false"
-      - key: PUPPETEER_EXECUTABLE_PATH
-        value: "/usr/bin/google-chrome-stable"
       - key: NODE_ENV
         value: production
       - key: PORT

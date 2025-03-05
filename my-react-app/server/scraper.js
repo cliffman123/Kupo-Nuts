@@ -2,7 +2,6 @@ const puppeteer = require('puppeteer-extra'); // Use puppeteer-extra package
 const fs = require('fs');
 const path = require('path');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const puppeteerConfig = require('../puppeteer-config'); // Import the puppeteer configuration
 require('dotenv').config();
 
 puppeteer.use(StealthPlugin());
@@ -48,21 +47,13 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
         const postLinksQueue = [];
         
         if (!page) {
-            // Use the imported puppeteer configuration
-            const launchConfig = {
-                ...puppeteerConfig,
+            browser = await puppeteer.launch({
                 headless: providedLink ? false : false,
-            };
-            
-            // Add uBlock only in development environment
-            if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'production') {
-                launchConfig.args.push(
+                args: [
                     `--disable-extensions-except=${uBlockPath}`,
                     `--load-extension=${uBlockPath}`
-                );
-            }
-            
-            browser = await puppeteer.launch(launchConfig);
+                ]
+            });
             const context = browser.defaultBrowserContext();
             page = await context.newPage();
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
@@ -397,22 +388,14 @@ const scrapeSavedLinks = async () => {
     const data = fs.readFileSync(filePath, 'utf8');
     const links = JSON.parse(data);
 
-    // Use the imported puppeteer configuration
-    const launchConfig = {
-        ...puppeteerConfig,
-        headless: true
-    };
-    
-    // Add uBlock only in development environment
-    if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'production') {
-        launchConfig.executablePath = EDGE_PATH;
-        launchConfig.args.push(
+    const browser = await puppeteer.launch({
+        executablePath: EDGE_PATH,
+        headless: true,
+        args: [
             `--disable-extensions-except=${uBlockPath}`,
             `--load-extension=${uBlockPath}`
-        );
-    }
-    
-    const browser = await puppeteer.launch(launchConfig);
+        ]
+    });
 
     const scrapePromises = links.map(async (link) => {
         const page = await browser.newPage();
