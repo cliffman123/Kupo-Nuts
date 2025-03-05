@@ -633,9 +633,6 @@ app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
     }
 });
 
-// Import routes
-const similarRoutes = require('./routes/similar');
-
 // Serve static files from the React app
 app.use(express.static(path.join(__dirname, '../build')));
 
@@ -686,9 +683,6 @@ if (process.env.NODE_ENV === 'production') {
         }
     }));
 }
-
-// Use routes
-app.use('/api/similar', similarRoutes);
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on port ${PORT}`);
