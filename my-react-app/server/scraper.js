@@ -2,6 +2,7 @@ const puppeteer = require('puppeteer-extra'); // Use puppeteer-extra package
 const fs = require('fs');
 const path = require('path');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const puppeteerConfig = require('../../puppeteer-config'); // Fix path to go up two directories
 require('dotenv').config();
 
 puppeteer.use(StealthPlugin());
