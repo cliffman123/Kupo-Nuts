@@ -48,13 +48,26 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
         const postLinksQueue = [];
         
         if (!page) {
-            browser = await puppeteer.launch({
+            // Use the puppeteerConfig here
+            const launchOptions = {
+                ...puppeteerConfig,
                 headless: providedLink ? false : false,
-                args: [
+            };
+            
+            // Only add extensions in development environment
+            if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'production') {
+                launchOptions.args = [
+                    ...(launchOptions.args || []),
                     `--disable-extensions-except=${uBlockPath}`,
                     `--load-extension=${uBlockPath}`
-                ]
-            });
+                ];
+                
+                if (process.env.NODE_ENV !== 'production') {
+                    launchOptions.executablePath = EDGE_PATH;
+                }
+            }
+            
+            browser = await puppeteer.launch(launchOptions);
             const context = browser.defaultBrowserContext();
             page = await context.newPage();
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
@@ -389,14 +402,26 @@ const scrapeSavedLinks = async () => {
     const data = fs.readFileSync(filePath, 'utf8');
     const links = JSON.parse(data);
 
-    const browser = await puppeteer.launch({
-        executablePath: EDGE_PATH,
+    // Use puppeteerConfig here too
+    const launchOptions = {
+        ...puppeteerConfig,
         headless: true,
-        args: [
+    };
+    
+    // Only add extensions in development environment
+    if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'production') {
+        launchOptions.args = [
+            ...(launchOptions.args || []),
             `--disable-extensions-except=${uBlockPath}`,
             `--load-extension=${uBlockPath}`
-        ]
-    });
+        ];
+        
+        if (process.env.NODE_ENV !== 'production') {
+            launchOptions.executablePath = EDGE_PATH;
+        }
+    }
+    
+    const browser = await puppeteer.launch(launchOptions);
 
     const scrapePromises = links.map(async (link) => {
         const page = await browser.newPage();
