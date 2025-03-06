@@ -10,11 +10,6 @@ const session = require('express-session');
 const cookieParser = require('cookie-parser');
 const { scrapeVideos } = require('./scraper');
 const axios = require('axios'); // Add this line to import axios
-const testScraper = require('./test-scraper'); // Import the test-scraper
-
-// Add this near the top of your server.js file
-console.log('Current directory:', process.cwd());
-console.log('Files in current directory:', require('fs').readdirSync('.'));
 
 const app = express();
 const PORT = process.env.PORT || 5000; // Change port to 5000m 3000 to 5000
@@ -632,19 +627,37 @@ app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'No valid URLs found in import file' });
         }
 
-        // Replace existing scrape links with the imported ones
+        // Always replace the existing file
         fs.writeFileSync(filePath, JSON.stringify(validLinks, null, 2), 'utf8');
         
         // Automatically start scraping the new links
         await scrapeSavedLinks(req.user.username);
         
         res.json({ 
-            message: 'Scrape list imported and scraping started', 
+            message: 'Scrape list replaced and scraping started', 
             total: validLinks.length
         });
     } catch (error) {
         console.error('Error importing scrape list:', error);
         res.status(500).json({ error: 'Failed to import scrape list' });
+    }
+});
+
+// Add endpoint to export scrape list
+app.get('/api/export-scrape-list', authenticateToken, (req, res) => {
+    const filePath = getUserFilePath(req.user.username, 'scrape-links');
+    
+    try {
+        if (!fs.existsSync(filePath)) {
+            return res.json([]); // Return empty array if file doesn't exist
+        }
+        
+        const data = fs.readFileSync(filePath, 'utf8');
+        const links = JSON.parse(data);
+        res.json(links);
+    } catch (error) {
+        console.error('Error exporting scrape list:', error);
+        res.status(500).json({ error: 'Failed to export scrape list' });
     }
 });
 

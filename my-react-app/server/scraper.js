@@ -2,7 +2,6 @@ const puppeteer = require('puppeteer-extra'); // Use puppeteer-extra package
 const fs = require('fs');
 const path = require('path');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const puppeteerConfig = require('../puppeteer-config'); // Fix path to go up one directory level
 require('dotenv').config();
 
 puppeteer.use(StealthPlugin());
@@ -22,6 +21,7 @@ const NEXT_PAGE_SELECTORS = [
     '#custom_list_videos_common_videos_pagination > div.item.pager.next > a > svg > use',
     '#paginator > a:nth-child(10)',
     'body > div.main_content > div.overview_thumbs > ul > li:nth-child(4) > a',
+    '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div > section > div.sc-s8zj3z-4.gjeneI > div.sc-ikag3o-1.mFrzi > nav > a:nth-child(9)',
     '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div > section > div.sc-s8zj3z-4.gjeneI > div.sc-ikag3o-1.mFrzi > nav > a:nth-child(9)',
     '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div.sc-12rgki1-0.jMEnyM > nav > a:nth-child(9)'
 ];
@@ -48,23 +48,18 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
         const postLinksQueue = [];
         
         if (!page) {
-            // Use the puppeteerConfig here
+            // Define launch options directly without puppeteerConfig
             const launchOptions = {
-                ...puppeteerConfig,
                 headless: providedLink ? false : false,
-            };
-            
-            // Only add extensions in development environment
-            if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'production') {
-                launchOptions.args = [
-                    ...(launchOptions.args || []),
+                args: [
                     `--disable-extensions-except=${uBlockPath}`,
                     `--load-extension=${uBlockPath}`
-                ];
-                
-                if (process.env.NODE_ENV !== 'production') {
-                    launchOptions.executablePath = EDGE_PATH;
-                }
+                ]
+            };
+            
+            // Only add specific options in development environment
+            if (process.env.NODE_ENV !== 'production') {
+                launchOptions.executablePath = EDGE_PATH;
             }
             
             browser = await puppeteer.launch(launchOptions);
@@ -402,23 +397,18 @@ const scrapeSavedLinks = async () => {
     const data = fs.readFileSync(filePath, 'utf8');
     const links = JSON.parse(data);
 
-    // Use puppeteerConfig here too
+    // Define launch options directly without puppeteerConfig
     const launchOptions = {
-        ...puppeteerConfig,
         headless: true,
-    };
-    
-    // Only add extensions in development environment
-    if (!process.env.NODE_ENV || process.env.NODE_ENV !== 'production') {
-        launchOptions.args = [
-            ...(launchOptions.args || []),
+        args: [
             `--disable-extensions-except=${uBlockPath}`,
             `--load-extension=${uBlockPath}`
-        ];
-        
-        if (process.env.NODE_ENV !== 'production') {
-            launchOptions.executablePath = EDGE_PATH;
-        }
+        ]
+    };
+    
+    // Only add specific options in development environment
+    if (!process.env.NODE_ENV !== 'production') {
+        launchOptions.executablePath = EDGE_PATH;
     }
     
     const browser = await puppeteer.launch(launchOptions);
