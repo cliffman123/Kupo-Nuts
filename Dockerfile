@@ -15,11 +15,12 @@ RUN npm ci
 # Copy server files
 COPY my-react-app/server/ ./
 
-# Create build directory if it doesn't exist
+# Create build directory
 RUN mkdir -p ../build
 
-# Copy any existing build files (but don't fail if not found)
-COPY my-react-app/build/ ../build/ 2>/dev/null || :
+# Copy React static files if they exist (optional)
+# We'll use shell script to handle this conditionally
+RUN mkdir -p ../build/users
 
 # Start the server
 CMD [ "node", "server.js" ]
