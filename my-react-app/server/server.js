@@ -10,6 +10,7 @@ const session = require('express-session');
 const cookieParser = require('cookie-parser');
 const { scrapeVideos } = require('./scraper');
 const axios = require('axios'); // Add this line to import axios
+const testScraper = require('./test-scraper'); // Import the test-scraper
 
 // Add this near the top of your server.js file
 console.log('Current directory:', process.cwd());
@@ -559,6 +560,21 @@ app.post('/api/similar', authenticateToken, async (req, res) => {
     const username = req.user.username;
 
     try {
+        console.log(`Testing navigation to: ${url}`);
+        
+        // First run a test to check if we can reach the URL
+        const testResult = await testScraper.runTest(url);
+        
+        if (!testResult.success) {
+            console.error(`Navigation test failed: ${testResult.message}`);
+            return res.status(400).json({ 
+                message: `Failed to navigate to the target URL: ${testResult.message}`,
+                count: 0
+            });
+        }
+        
+        console.log('Navigation test successful, proceeding with similar posts search');
+        
         // Get initial count
         const userLinksPath = path.join(__dirname, '../build/users', username, 'links.json');
         const initialCount = fs.existsSync(userLinksPath) ? 
@@ -566,8 +582,7 @@ app.post('/api/similar', authenticateToken, async (req, res) => {
 
         console.log(`Finding similar posts for user ${username} from post: ${url}`);
         
-        // Pass the URL directly to scrapeVideos without trying to modify it
-        // The scraper will handle the appropriate URL format
+        // After successful test, proceed with the standard scrapeVideos function
         await scrapeVideos(url, null, username);
         
         // Get final count
