@@ -2,6 +2,7 @@ const puppeteer = require('puppeteer-extra'); // Use puppeteer-extra package
 const fs = require('fs');
 const path = require('path');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+const { exec } = require('child_process');
 require('dotenv').config();
 
 puppeteer.use(StealthPlugin());
@@ -52,9 +53,12 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
             const launchOptions = {
                 headless: providedLink ? false : false,
                 args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
                     `--disable-extensions-except=${uBlockPath}`,
                     `--load-extension=${uBlockPath}`
-                ]
+                ],
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
             };
             
             // Only add specific options in development environment
