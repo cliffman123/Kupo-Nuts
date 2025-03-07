@@ -7,9 +7,17 @@ ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
 
 WORKDIR /usr/src/app
 
-# Install chromium-browser explicitly
+# Install chromium-browser explicitly and fix GPG key error
 USER root
-RUN apt-get update && apt-get install -y \
+# Add Google Chrome repository key
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gnupg \
+    ca-certificates \
+    curl \
+    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 32EE5355A6BC6E42 \
+    && apt-get update \
+    && apt-get install -y \
     chromium-browser \
     --no-install-recommends \
     && apt-get clean \
