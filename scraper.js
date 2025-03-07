@@ -8,12 +8,12 @@ require('dotenv').config();
 puppeteer.use(StealthPlugin());
 
 const EDGE_PATH = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const LINKS_PATH = process.env.LINKS_PATH || 'C:\\Users\\cliff\\.vscode\\Website Project\\my-react-app\\build\\links.json';
+const LINKS_PATH = process.env.LINKS_PATH || path.join(__dirname, '../build/links.json');
 const LOGIN_URL = process.env.LOGIN_URL || 'https://rule34.xyz/auth/login';
 const FEED_URL = process.env.FEED_URL || 'https://www.pixiv.net/discovery?mode=r18';
-const COOKIES_PATH = path.resolve(__dirname, 'cookies.json');
+const COOKIES_PATH = path.join(__dirname, 'cookies.json');
 const PIXIV_LOGIN_URL = process.env.PIXIV_LOGIN_URL || 'https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2Fen%2F&lang=en&source=pc&view_type=page';
-const USER_DATA_DIR = 'C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data'; // Update this path to your Edge user data directory
+const USER_DATA_DIR = process.env.USER_DATA_DIR || 'C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data'; 
 const NEXT_PAGE_SELECTORS = [
     'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-feed-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
     'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-home-page > div > div.right-panel > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target', // Selector for the "Next Page For Post" button
@@ -27,8 +27,8 @@ const NEXT_PAGE_SELECTORS = [
     '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div.sc-12rgki1-0.jMEnyM > nav > a:nth-child(9)'
 ];
 const PAGE_TARGET = process.env.PAGE_TARGET || 10;
-const uBlockPath = path.resolve('C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data/Default/Extensions/odfafepnkmbhccpbejgmiehpchacaeak/1.62.0_0');
-const PIXIV_LINKS_PATH = path.resolve(__dirname, '../build/pixivLinks.json');
+const uBlockPath = process.env.UBLOCK_PATH || 'C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data/Default/Extensions/odfafepnkmbhccpbejgmiehpchacaeak/1.62.0_0';
+const PIXIV_LINKS_PATH = path.join(__dirname, '../build/pixivLinks.json');
 
 const PIXIV_USERNAME = process.env.PIXIV_USERNAME;
 const PIXIV_PASSWORD = process.env.PIXIV_PASSWORD;
@@ -392,10 +392,17 @@ const clearPixivLinks = () => {
 
 const randomWait = () => new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 1000) + 500));
 
-const scrapeSavedLinks = async () => {
-    const filePath = path.join(__dirname, '../public/scrape-links.json');
+const scrapeSavedLinks = async (username) => {
+    if (!username) {
+        console.error('No username provided for scraping saved links');
+        return [];
+    }
+    
+    const userDir = path.join(__dirname, '../build/users', username);
+    const filePath = path.join(userDir, 'scrape-links.json');
+    
     if (!fs.existsSync(filePath)) {
-        throw new Error('scrape-links.json file not found');
+        throw new Error(`scrape-links.json file not found for user ${username}`);
     }
 
     const data = fs.readFileSync(filePath, 'utf8');
