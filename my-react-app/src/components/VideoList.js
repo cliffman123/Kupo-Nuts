@@ -33,7 +33,6 @@ const VideoList = () => {
     const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [isClickable, setIsClickable] = useState(true);
     const [loadedMedia, setLoadedMedia] = useState({});
-    const [reachedEnd, setReachedEnd] = useState(false);
     const [randomSeed, setRandomSeed] = useState(Date.now());
     const mediaRefs = useRef([]);
     const mediaSet = useRef(new Set());
@@ -41,7 +40,6 @@ const VideoList = () => {
 
     const initialMediaPerPage = 8;
     const mediaPerPage = 16;
-    const minMediaForReset = 40; // Minimum media count required for the infinite loop behavior
 
     const shuffleArray = useCallback((array) => {
         const newArray = [...array];
@@ -96,21 +94,10 @@ const VideoList = () => {
             const totalAvailableItems = mediaLinks.length;
             const startIndex = (page - 1) * limit;
             
-            // Only consider "reached end" logic if we have enough media items
-            const hasEnoughMedia = totalAvailableItems >= minMediaForReset;
-            
+            // Check if we've reached the end, but don't refresh
             if (startIndex >= totalAvailableItems) {
-                if (hasEnoughMedia && !reachedEnd) {
-                    setReachedEnd(true);
-                    showNotification("Reached the end! Showing content in a new random order", "info");
-                    setRandomSeed(Date.now());
-                    setCurrentPage(1);
-                    setMediaUrls([]);
-                    await fetchMedia(1, initialMediaPerPage);
-                    return;
-                }
-            } else {
-                setReachedEnd(false);
+                // We've reached the end, simply return without loading more
+                return;
             }
 
             let sortedMediaLinks;
@@ -132,18 +119,6 @@ const VideoList = () => {
             const endIndex = Math.min(startIndex + limit, totalAvailableItems);
             const newMediaUrls = sortedMediaLinks.slice(startIndex, endIndex);
 
-            if (newMediaUrls.length === 0 && page > 1) {
-                if (hasEnoughMedia && !reachedEnd) {
-                    setReachedEnd(true);
-                    showNotification("Reached the end! Showing content in a new random order", "info");
-                    setRandomSeed(Date.now());
-                    setCurrentPage(1);
-                    setMediaUrls([]);
-                    await fetchMedia(1, initialMediaPerPage);
-                }
-                return;
-            }
-
             if (page === 1) {
                 mediaSet.current.clear(); // Clear mediaSet before setting new media URLs
             }
@@ -162,7 +137,7 @@ const VideoList = () => {
         } finally {
             setLoading(false);
         }
-    }, [filter, isLoggedIn, reachedEnd, randomSeed, initialMediaPerPage, shuffleArray]);
+    }, [filter, isLoggedIn, shuffleArray]);
 
     const setCookies = () => {
         const cookies = JSON.parse(localStorage.getItem('cookies'));
@@ -561,7 +536,6 @@ const VideoList = () => {
     }, [autoScroll, fullscreenMedia]);
 
     useEffect(() => {
-        setReachedEnd(false);
         setRandomSeed(Date.now());
     }, [filter]);
 
@@ -738,6 +712,8 @@ const VideoList = () => {
                 method: 'POST',
                 ...fetchConfig,
             });
+            
+            // Update state first
             setIsLoggedIn(false);
             setFilter('random'); // Set filter to random when logging out
             showNotification('Logged out successfully', 'success');
@@ -745,10 +721,18 @@ const VideoList = () => {
             // Close profile menu
             setShowProfileMenu(false);
             
-            // Short timeout to allow notification to appear before refresh
-            setTimeout(() => {
-                window.location.reload(); // Refresh the page
-            }, 1000);
+            // Instead of fetching from API, just set to default links for non-logged in users
+            if (defaultLinks && defaultLinks.length > 0) {
+                const links = defaultLinks.map(item => [item.postLink || '', item.videoLinks]);
+                const shuffledLinks = shuffleArray([...links]);
+                setMediaUrls(shuffledLinks.slice(0, initialMediaPerPage));
+            } else {
+                setMediaUrls([]);
+            }
+            
+            // Reset page
+            setCurrentPage(1);
+            
         } catch (error) {
             showNotification('Logout failed', 'error');
         }
