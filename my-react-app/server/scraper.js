@@ -51,25 +51,23 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
         if (!page) {
             // Define launch options for Puppeteer 19.7.2
             const launchOptions = {
-                headless: true, // Always use true in Docker
+                headless: false, // Use boolean instead of 'new' for compatibility
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-gpu'
+                    '--disable-gpu',
+                    `--disable-extensions-except=${uBlockPath}`,
+                    `--load-extension=${uBlockPath}`
                 ],
-                executablePath: '/usr/bin/chromium-browser' // Directly specify the path
+                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
             };
             
-            // Only use different options in development environment
+            // Only add specific options in development environment
             if (process.env.NODE_ENV !== 'production') {
-                launchOptions.headless = false;
-                launchOptions.args.push(`--disable-extensions-except=${uBlockPath}`);
-                launchOptions.args.push(`--load-extension=${uBlockPath}`);
                 launchOptions.executablePath = EDGE_PATH;
             }
             
-            console.log('Launching browser with options:', JSON.stringify(launchOptions, null, 2));
             browser = await puppeteer.launch(launchOptions);
             const context = browser.defaultBrowserContext();
             page = await context.newPage();
@@ -407,20 +405,18 @@ const scrapeSavedLinks = async () => {
 
     // Define launch options for Puppeteer 19.7.2
     const launchOptions = {
-        headless: true,
+        headless: true, // Use boolean instead of 'new'
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-gpu'
-        ],
-        executablePath: '/usr/bin/chromium-browser' // Directly specify the path
+            `--disable-extensions-except=${uBlockPath}`,
+            `--load-extension=${uBlockPath}`
+        ]
     };
     
-    // Only use different options in development environment
-    if (process.env.NODE_ENV !== 'production') {
-        launchOptions.args.push(`--disable-extensions-except=${uBlockPath}`);
-        launchOptions.args.push(`--load-extension=${uBlockPath}`);
+    // Only add specific options in development environment
+    if (!process.env.NODE_ENV !== 'production') {
         launchOptions.executablePath = EDGE_PATH;
     }
     

@@ -2,41 +2,25 @@ FROM ghcr.io/puppeteer/puppeteer:19.7.2
 
 # Set environment variables for Puppeteer 19.7.2
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
-    NODE_ENV=production
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 WORKDIR /usr/src/app
 
-# Install chromium-browser explicitly and fix GPG key error
-USER root
-# Add Google Chrome repository key
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gnupg \
-    ca-certificates \
-    curl \
-    && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 32EE5355A6BC6E42 \
-    && apt-get update \
-    && apt-get install -y \
-    chromium-browser \
-    --no-install-recommends \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Verify that chromium-browser was installed correctly
-RUN which chromium-browser || echo "chromium-browser not found in PATH"
-RUN ls -la /usr/bin/chromium* || echo "No chromium executables found in /usr/bin"
-
 COPY package*.json ./
-RUN npm ci
+RUN npm install
 COPY . .
 
 # Create data directory with proper permissions
 RUN mkdir -p /usr/src/app/data/users && \
     chown -R pptruser:pptruser /usr/src/app/data
 
+# Debug: Print Chromium information 
+RUN echo "Checking for browser executables:" && \
+    ls -la /usr/bin/chromium* || echo "No chromium in /usr/bin" && \
+    ls -la /usr/bin/google-chrome* || echo "No google-chrome in /usr/bin"
+
 # Switch to pptruser (the default user in puppeteer image)
 USER pptruser
 
 # Run our diagnostic script before starting the server
-CMD node find-chrome.js && node my-react-app/server/server.js
+CMD node my-react-app/server/server.js
