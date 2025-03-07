@@ -28,7 +28,7 @@ const NEXT_PAGE_SELECTORS = [
 ];
 const PAGE_TARGET = process.env.PAGE_TARGET || 10;
 const uBlockPath = path.resolve('C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data/Default/Extensions/odfafepnkmbhccpbejgmiehpchacaeak/1.62.0_0');
-const PIXIV_LINKS_PATH = path.resolve(__dirname, '../build/pixivLinks.json');
+const PIXIV_LINKS_PATH = path.resolve(__dirname, '../../data/pixivLinks.json');
 
 const PIXIV_USERNAME = process.env.PIXIV_USERNAME;
 const PIXIV_PASSWORD = process.env.PIXIV_PASSWORD;
@@ -326,7 +326,8 @@ const saveMediaLinks = (mediaLinks, username) => {
         return 0;
     }
     
-    const userDir = path.join(__dirname, '../build/users', username);
+    // Use data/users instead of build/users to match server.js
+    const userDir = path.join(__dirname, '../../data/users', username);
     if (!fs.existsSync(userDir)) {
         fs.mkdirSync(userDir, { recursive: true });
     }
@@ -358,7 +359,8 @@ const savePixivLinks = (pixivLinks, username, providedLink) => {
         return 0;
     }
     
-    const userDir = path.join(__dirname, '../build/users', username);
+    // Use data/users instead of build/users to match server.js
+    const userDir = path.join(__dirname, '../../data/users', username);
     if (!fs.existsSync(userDir)) {
         fs.mkdirSync(userDir, { recursive: true });
     }
