@@ -1,8 +1,8 @@
-FROM ghcr.io/puppeteer/puppeteer:23.11.1
+FROM ghcr.io/puppeteer/puppeteer:19.7.2
 
-# The puppeteer Docker image uses chromium-browser, not google-chrome-stable
+# Set environment variables for Puppeteer 19.7.2
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 
 WORKDIR /usr/src/app
 
@@ -23,4 +23,4 @@ RUN echo "Checking for browser executables:" && \
 USER pptruser
 
 # Run our diagnostic script before starting the server
-CMD node find-chrome.js && node server.js
+CMD node my-react-app/server/server.js

@@ -49,12 +49,14 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
         const postLinksQueue = [];
         
         if (!page) {
-            // Define launch options directly without puppeteerConfig
+            // Define launch options for Puppeteer 19.7.2
             const launchOptions = {
-                headless: providedLink ? false : false,
+                headless: false, // Use boolean instead of 'new' for compatibility
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
                     `--disable-extensions-except=${uBlockPath}`,
                     `--load-extension=${uBlockPath}`
                 ],
@@ -69,7 +71,7 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
             browser = await puppeteer.launch(launchOptions);
             const context = browser.defaultBrowserContext();
             page = await context.newPage();
-            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
             await loadCookies(page); // Load cookies before doing anything
         }
 
@@ -401,10 +403,13 @@ const scrapeSavedLinks = async () => {
     const data = fs.readFileSync(filePath, 'utf8');
     const links = JSON.parse(data);
 
-    // Define launch options directly without puppeteerConfig
+    // Define launch options for Puppeteer 19.7.2
     const launchOptions = {
-        headless: true,
+        headless: true, // Use boolean instead of 'new'
         args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
             `--disable-extensions-except=${uBlockPath}`,
             `--load-extension=${uBlockPath}`
         ]
