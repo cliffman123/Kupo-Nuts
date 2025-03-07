@@ -49,25 +49,28 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
         const postLinksQueue = [];
         
         if (!page) {
-            // Define launch options for Puppeteer 19.7.2
+            // Let Puppeteer use its bundled Chromium
             const launchOptions = {
-                headless: false, // Use boolean instead of 'new' for compatibility
+                headless: process.env.NODE_ENV === 'production', // Use headless mode in production
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    `--disable-extensions-except=${uBlockPath}`,
-                    `--load-extension=${uBlockPath}`
-                ],
-                executablePath: process.env.PUPPETEER_EXECUTABLE_PATH
+                    '--disable-gpu'
+                ]
+                // Remove executablePath to use bundled Chromium
             };
             
-            // Only add specific options in development environment
+            // Only use different options in development environment
             if (process.env.NODE_ENV !== 'production') {
+                launchOptions.headless = false;
+                launchOptions.args.push(`--disable-extensions-except=${uBlockPath}`);
+                launchOptions.args.push(`--load-extension=${uBlockPath}`);
+                // Only use Edge in development environment
                 launchOptions.executablePath = EDGE_PATH;
             }
             
+            console.log('Launching browser with options:', JSON.stringify(launchOptions, null, 2));
             browser = await puppeteer.launch(launchOptions);
             const context = browser.defaultBrowserContext();
             page = await context.newPage();
@@ -403,20 +406,22 @@ const scrapeSavedLinks = async () => {
     const data = fs.readFileSync(filePath, 'utf8');
     const links = JSON.parse(data);
 
-    // Define launch options for Puppeteer 19.7.2
+    // Let Puppeteer use its bundled Chromium
     const launchOptions = {
-        headless: true, // Use boolean instead of 'new'
+        headless: process.env.NODE_ENV === 'production',
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            `--disable-extensions-except=${uBlockPath}`,
-            `--load-extension=${uBlockPath}`
+            '--disable-gpu'
         ]
+        // Remove executablePath to use bundled Chromium
     };
     
-    // Only add specific options in development environment
-    if (!process.env.NODE_ENV !== 'production') {
+    // Only use different options in development environment
+    if (process.env.NODE_ENV !== 'production') {
+        launchOptions.args.push(`--disable-extensions-except=${uBlockPath}`);
+        launchOptions.args.push(`--load-extension=${uBlockPath}`);
         launchOptions.executablePath = EDGE_PATH;
     }
     
