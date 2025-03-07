@@ -135,23 +135,35 @@ const checkLoginAttempts = (req, res, next) => {
 };
 
 // Add these helper functions after the existing constants
+// Update getUserFilePath function to use a directory with proper permissions
 const getUserFilePath = (username, fileType) => {
-    const userDir = path.join(__dirname, '../build/users', username);
-    if (!fs.existsSync(userDir)) {
-        fs.mkdirSync(userDir, { recursive: true });
+    // Use a directory that pptruser can write to
+    const userDir = path.join(__dirname, '../../data/users', username);
+    try {
+        if (!fs.existsSync(userDir)) {
+            fs.mkdirSync(userDir, { recursive: true, mode: 0o755 });
+        }
+        return path.join(userDir, `${fileType}.json`);
+    } catch (error) {
+        console.error(`Error creating directory for user ${username}:`, error);
+        throw new Error(`Cannot create user directory: ${error.message}`);
     }
-    return path.join(userDir, `${fileType}.json`);
 };
 
 const initializeUserFiles = (username) => {
-    const linksPath = getUserFilePath(username, 'links');
-    const scrapeLinksPath = getUserFilePath(username, 'scrape-links');
-    
-    if (!fs.existsSync(linksPath)) {
-        fs.writeFileSync(linksPath, '[]', 'utf8');
-    }
-    if (!fs.existsSync(scrapeLinksPath)) {
-        fs.writeFileSync(scrapeLinksPath, '[]', 'utf8');
+    try {
+        const linksPath = getUserFilePath(username, 'links');
+        const scrapeLinksPath = getUserFilePath(username, 'scrape-links');
+        
+        if (!fs.existsSync(linksPath)) {
+            fs.writeFileSync(linksPath, '[]', 'utf8');
+        }
+        if (!fs.existsSync(scrapeLinksPath)) {
+            fs.writeFileSync(scrapeLinksPath, '[]', 'utf8');
+        }
+    } catch (error) {
+        console.error(`Error initializing files for user ${username}:`, error);
+        throw new Error(`Cannot initialize user files: ${error.message}`);
     }
 };
 
@@ -680,19 +692,30 @@ app.get('*', (req, res) => {
 
 // Fix the clearUserData function - there appears to be corruption in this section
 const clearUserData = () => {
-    const buildDir = path.join(__dirname, '../build');
-    const usersDir = path.join(buildDir, 'users');
+    const dataDir = path.join(__dirname, '../../data');
+    const usersDir = path.join(dataDir, 'users');
     
-    if (fs.existsSync(usersDir)) {
-        console.log('Clearing user data...');
-        fs.rmSync(usersDir, { recursive: true, force: true });
-        fs.mkdirSync(usersDir);
-        console.log('User data cleared successfully');
+    try {
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true, mode: 0o755 });
+        }
+        
+        if (fs.existsSync(usersDir)) {
+            console.log('Clearing user data...');
+            fs.rmSync(usersDir, { recursive: true, force: true });
+            fs.mkdirSync(usersDir, { mode: 0o755 });
+            console.log('User data cleared successfully');
+        } else {
+            fs.mkdirSync(usersDir, { mode: 0o755 });
+        }
+        
+        // Reset users object
+        Object.keys(users).forEach(key => delete users[key]);
+        console.log('Users object reset');
+    } catch (error) {
+        console.error('Error during clearUserData:', error);
+        // Don't throw here, just log the error and continue
     }
-    
-    // Reset users object
-    Object.keys(users).forEach(key => delete users[key]);
-    console.log('Users object reset');
 };
 
 // Clear user data when server starts

@@ -17,7 +17,11 @@ const puppeteerConfig = {
   ],
   
   // Increase timeout for slower cloud environments
-  timeout: 60000
+  timeout: 60000,
+  
+  // Ensure proper permissions in Docker environment
+  handleSIGINT: false,
+  dumpio: true
 };
 
 module.exports = puppeteerConfig;
