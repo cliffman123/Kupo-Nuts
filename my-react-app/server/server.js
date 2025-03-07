@@ -39,7 +39,8 @@ app.use((req, res, next) => {
         'https://cliffman123.github.io',
         'https://cliffman123.github.io/Kupo-Nuts', // Without trailing slash
         'https://cliffman123.github.io/Kupo-Nuts/', // With trailing slash
-        'https://kupo-nuts-frontend.onrender.com'  // Add your frontend Render URL
+        'https://kupo-nuts-frontend.onrender.com',  // Frontend Render URL
+        'https://kupo-nuts.onrender.com'           // API Render URL
     ];
     
     // Set CORS headers based on origin
@@ -47,7 +48,7 @@ app.use((req, res, next) => {
         res.setHeader('Access-Control-Allow-Origin', origin);
         res.setHeader('Access-Control-Allow-Credentials', 'true');
         res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
     }
     
     // Handle preflight OPTIONS requests

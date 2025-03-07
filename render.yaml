@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: kupo-nuts-api
+    name: kupo-nuts
     env: node
     buildCommand: |
       # Update package lists
