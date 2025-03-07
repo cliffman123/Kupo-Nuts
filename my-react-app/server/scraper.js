@@ -11,7 +11,7 @@ const EDGE_PATH = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\
 const LINKS_PATH = process.env.LINKS_PATH || 'C:\\Users\\cliff\\.vscode\\Website Project\\my-react-app\\build\\links.json';
 const LOGIN_URL = process.env.LOGIN_URL || 'https://rule34.xyz/auth/login';
 const FEED_URL = process.env.FEED_URL || 'https://www.pixiv.net/discovery?mode=r18';
-const COOKIES_PATH = path.resolve(__dirname, 'cookies.json');
+// Remove COOKIES_PATH constant as we won't be using cookies
 const PIXIV_LOGIN_URL = process.env.PIXIV_LOGIN_URL || 'https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2Fen%2F&lang=en&source=pc&view_type=page';
 const USER_DATA_DIR = 'C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data'; // Update this path to your Edge user data directory
 const NEXT_PAGE_SELECTORS = [
@@ -33,12 +33,10 @@ const PIXIV_LINKS_PATH = path.resolve(__dirname, '../build/pixivLinks.json');
 const PIXIV_USERNAME = process.env.PIXIV_USERNAME;
 const PIXIV_PASSWORD = process.env.PIXIV_PASSWORD;
 
+// Replace loadCookies function with an empty implementation
 const loadCookies = async (page) => {
-    if (fs.existsSync(COOKIES_PATH)) {
-        const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf-8'));
-        await page.setCookie(...cookies);
-        console.log('Cookies loaded from', COOKIES_PATH);
-    }
+    // Removed cookie loading functionality to avoid protocol errors
+    console.log('Cookie loading disabled to prevent protocol errors');
 };
 
 const scrapeVideos = async (providedLink = null, page = null, username = null, progressCallback = null) => {
@@ -126,9 +124,10 @@ const loginToPixiv = async (page, providedLink) => {
         const currentUrl = page.url();
         if (currentUrl.includes('https://www.pixiv.net/en/')) {
             console.log('Successfully navigating to the Pixiv discovery page.');
-            const cookies = await page.cookies();
-            fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
-            console.log('Cookies saved to', COOKIES_PATH);
+            // Remove cookie saving to prevent protocol errors
+            // const cookies = await page.cookies();
+            // fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+            // console.log('Cookies saved to', COOKIES_PATH);
             return;
         }
         await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
@@ -561,5 +560,5 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
     return totalAdded;
 };
 
-module.exports = { scrapeVideos, scrapeSavedLinks};
+module.exports = { scrapeVideos, scrapeSavedLinks };
 

@@ -1,8 +1,7 @@
 FROM ghcr.io/puppeteer/puppeteer:19.7.2
 
-# Set environment variables for Puppeteer 19.7.2
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
-    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+# Remove the skip download flag to allow Puppeteer to use its bundled Chromium
+ENV NODE_ENV=production
 
 WORKDIR /usr/src/app
 
@@ -14,10 +13,11 @@ COPY . .
 RUN mkdir -p /usr/src/app/data/users && \
     chown -R pptruser:pptruser /usr/src/app/data
 
-# Debug: Print Chromium information 
+# Debug: Print browser information
 RUN echo "Checking for browser executables:" && \
     ls -la /usr/bin/chromium* || echo "No chromium in /usr/bin" && \
-    ls -la /usr/bin/google-chrome* || echo "No google-chrome in /usr/bin"
+    ls -la /usr/bin/google-chrome* || echo "No google-chrome in /usr/bin" && \
+    ls -la $(npm list -g puppeteer --depth=0 --parseable 2>/dev/null || echo ".") | grep -i chrom || echo "No bundled Chromium found"
 
 # Switch to pptruser (the default user in puppeteer image)
 USER pptruser
