@@ -13,6 +13,9 @@ COPY . .
 RUN mkdir -p /usr/src/app/data/users && \
     chown -R pptruser:pptruser /usr/src/app/data
 
+# Add a volume configuration for data persistence
+VOLUME ["/usr/src/app/data"]
+
 # Debug: Print browser information
 RUN echo "Checking for browser executables:" && \
     ls -la /usr/bin/chromium* || echo "No chromium in /usr/bin" && \

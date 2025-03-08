@@ -225,7 +225,7 @@ const checkLoginAttempts = (req, res, next) => {
     next();
 };
 
-// Load existing user data
+// Enhance loadExistingUsers to also restore user data files
 const loadExistingUsers = () => {
     try {
         const usersDir = getUsersDir();
@@ -252,6 +252,33 @@ const loadExistingUsers = () => {
                     // Initialize user files
                     initializeUserFiles(username);
                 });
+            }
+            
+            // Restore user data if backup exists
+            const userDataBackupFile = path.join(getDataDir(), 'user_data_backup.json');
+            if (fs.existsSync(userDataBackupFile)) {
+                console.log('Restoring user data from backup file');
+                try {
+                    const userData = JSON.parse(fs.readFileSync(userDataBackupFile, 'utf8'));
+                    
+                    Object.keys(userData).forEach(username => {
+                        // Restore links.json
+                        if (userData[username].links && Array.isArray(userData[username].links)) {
+                            const linksPath = getUserFilePath(username, 'links');
+                            fs.writeFileSync(linksPath, JSON.stringify(userData[username].links, null, 2), 'utf8');
+                        }
+                        
+                        // Restore scrape-links.json
+                        if (userData[username]['scrape-links'] && Array.isArray(userData[username]['scrape-links'])) {
+                            const scrapeLinksPath = getUserFilePath(username, 'scrape-links');
+                            fs.writeFileSync(scrapeLinksPath, JSON.stringify(userData[username]['scrape-links'], null, 2), 'utf8');
+                        }
+                    });
+                    
+                    console.log('User data restored successfully');
+                } catch (err) {
+                    console.error('Error restoring user data:', err);
+                }
             }
             return;
         }
@@ -291,12 +318,49 @@ const loadExistingUsers = () => {
     }
 };
 
-// Save users backup
+// Enhance the saveUsersBackup function to also backup user data files
 const saveUsersBackup = () => {
     try {
+        // Save user accounts
         const backupFile = path.join(getDataDir(), 'users_backup.json');
         fs.writeFileSync(backupFile, JSON.stringify(users, null, 2));
-        console.log('User data backup created');
+        
+        // Save user data files (links and scrape-links)
+        const usersDir = getUsersDir();
+        if (fs.existsSync(usersDir)) {
+            const userFolders = fs.readdirSync(usersDir);
+            const userData = {};
+            
+            userFolders.forEach(username => {
+                userData[username] = { links: [], 'scrape-links': [] };
+                
+                // Backup links.json
+                const linksPath = getUserFilePath(username, 'links');
+                if (fs.existsSync(linksPath)) {
+                    try {
+                        userData[username].links = JSON.parse(fs.readFileSync(linksPath, 'utf8'));
+                    } catch (err) {
+                        console.error(`Error backing up links for ${username}:`, err);
+                    }
+                }
+                
+                // Backup scrape-links.json
+                const scrapeLinksPath = getUserFilePath(username, 'scrape-links');
+                if (fs.existsSync(scrapeLinksPath)) {
+                    try {
+                        userData[username]['scrape-links'] = JSON.parse(fs.readFileSync(scrapeLinksPath, 'utf8'));
+                    } catch (err) {
+                        console.error(`Error backing up scrape-links for ${username}:`, err);
+                    }
+                }
+            });
+            
+            // Save consolidated user data
+            const userDataBackupFile = path.join(getDataDir(), 'user_data_backup.json');
+            fs.writeFileSync(userDataBackupFile, JSON.stringify(userData, null, 2));
+        }
+        
+        console.log('User data backup created successfully');
     } catch (error) {
         console.error('Error creating user data backup:', error);
     }
@@ -747,6 +811,12 @@ process.on('SIGTERM', () => {
     saveUsersBackup();
     process.exit();
 });
+
+// Add a periodic backup process (every 15 minutes)
+setInterval(() => {
+    console.log('Running scheduled backup of user data...');
+    saveUsersBackup();
+}, 15 * 60 * 1000);
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on port ${PORT}`);
