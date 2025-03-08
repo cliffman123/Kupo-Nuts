@@ -10,6 +10,8 @@ const session = require('express-session');
 const cookieParser = require('cookie-parser');
 const { scrapeVideos } = require('./scraper');
 const axios = require('axios');
+// Add FileStore for session persistence
+const FileStore = require('session-file-store')(session);
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -123,7 +125,20 @@ const getCookieOptions = () => ({
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
 });
 
+// Create sessions directory in the data folder
+const sessionsDir = path.join(getDataDir(), 'sessions');
+if (!fs.existsSync(sessionsDir)) {
+    fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o755 });
+}
+
+// Use FileStore instead of the default MemoryStore
 app.use(session({
+    store: new FileStore({
+        path: sessionsDir,
+        ttl: 86400, // 1 day in seconds
+        reapInterval: 3600, // Clean up expired sessions every hour
+        retries: 1
+    }),
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: false,
