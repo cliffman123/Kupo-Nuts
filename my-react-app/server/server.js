@@ -25,8 +25,29 @@ const users = {};
 const loginAttempts = {};
 
 // Helper functions for file paths and user data
-const getDataDir = () => path.join(__dirname, '../../data');
-const getUsersDir = () => path.join(getDataDir(), 'users');
+const getDataDir = () => {
+    // Use Render's persistent storage location if available
+    const renderDataDir = process.env.RENDER_SERVICE_NAME ? 
+        '/opt/render/project/src/data' : 
+        path.join(__dirname, '../../data');
+        
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(renderDataDir)) {
+        fs.mkdirSync(renderDataDir, { recursive: true, mode: 0o755 });
+    }
+    
+    // Set as environment variable for other modules to use
+    process.env.DATA_DIR = renderDataDir;
+    return renderDataDir;
+};
+
+const getUsersDir = () => {
+    const usersDir = path.join(getDataDir(), 'users');
+    if (!fs.existsSync(usersDir)) {
+        fs.mkdirSync(usersDir, { recursive: true, mode: 0o755 });
+    }
+    return usersDir;
+};
 
 const getUserDir = (username) => {
     const dir = path.join(getUsersDir(), username);
@@ -188,6 +209,28 @@ const loadExistingUsers = () => {
         const usersDir = getUsersDir();
         if (!fs.existsSync(usersDir)) {
             fs.mkdirSync(usersDir, { recursive: true, mode: 0o755 });
+            
+            // Check for backup user data file
+            const backupFile = path.join(getDataDir(), 'users_backup.json');
+            if (fs.existsSync(backupFile)) {
+                console.log('Restoring users from backup file');
+                const backupData = JSON.parse(fs.readFileSync(backupFile, 'utf8'));
+                
+                // Restore users from backup
+                Object.keys(backupData).forEach(username => {
+                    users[username] = backupData[username];
+                    
+                    // Create user directory
+                    const userDir = getUserDir(username);
+                    
+                    // Create password file
+                    const passwordPath = path.join(userDir, 'password.txt');
+                    fs.writeFileSync(passwordPath, users[username].password);
+                    
+                    // Initialize user files
+                    initializeUserFiles(username);
+                });
+            }
             return;
         }
         
@@ -218,8 +261,22 @@ const loadExistingUsers = () => {
         });
         
         console.log(`Loaded ${Object.keys(users).length} users`);
+        
+        // Create backup of users data
+        saveUsersBackup();
     } catch (error) {
         console.error('Error loading existing users:', error);
+    }
+};
+
+// Save users backup
+const saveUsersBackup = () => {
+    try {
+        const backupFile = path.join(getDataDir(), 'users_backup.json');
+        fs.writeFileSync(backupFile, JSON.stringify(users, null, 2));
+        console.log('User data backup created');
+    } catch (error) {
+        console.error('Error creating user data backup:', error);
     }
 };
 
@@ -246,6 +303,9 @@ app.post('/api/register', validatePassword, async (req, res) => {
         
         const passwordPath = path.join(getUserDir(username), 'password.txt');
         fs.writeFileSync(passwordPath, hashedPassword);
+        
+        // Create backup after adding a new user
+        saveUsersBackup();
 
         res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
@@ -653,6 +713,20 @@ app.get('*', (req, res) => {
 // Initialize server
 loadExistingUsers();
 
+// Add a shutdown handler to save user data
+process.on('SIGINT', () => {
+    console.log('Server shutting down, saving user data...');
+    saveUsersBackup();
+    process.exit();
+});
+
+process.on('SIGTERM', () => {
+    console.log('Server shutting down, saving user data...');
+    saveUsersBackup();
+    process.exit();
+});
+
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(`Using data directory: ${getDataDir()}`);
 });

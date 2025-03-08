@@ -13,7 +13,7 @@ const LOGIN_URL = process.env.LOGIN_URL || 'https://rule34.xyz/auth/login';
 const FEED_URL = process.env.FEED_URL || 'https://www.pixiv.net/discovery?mode=r18';
 // Remove COOKIES_PATH constant as we won't be using cookies
 const PIXIV_LOGIN_URL = process.env.PIXIV_LOGIN_URL || 'https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2Fen%2F&lang=en&source=pc&view_type=page';
-const USER_DATA_DIR = 'C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data'; // Update this path to your Edge user data directory
+const USER_DATA_DIR = process.env.USER_DATA_DIR || 'C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data'; // Update this path to your Edge user data directory
 const NEXT_PAGE_SELECTORS = [
     'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-feed-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
     'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-home-page > div > div.right-panel > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target', // Selector for the "Next Page For Post" button
@@ -27,8 +27,8 @@ const NEXT_PAGE_SELECTORS = [
     '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div.sc-12rgki1-0.jMEnyM > nav > a:nth-child(9)'
 ];
 const PAGE_TARGET = process.env.PAGE_TARGET || 10;
-const uBlockPath = path.resolve('C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data/Default/Extensions/odfafepnkmbhccpbejgmiehpchacaeak/1.62.0_0');
-const PIXIV_LINKS_PATH = path.resolve(__dirname, '../../data/pixivLinks.json');
+const uBlockPath = process.env.UBLOCK_PATH || path.resolve('C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data/Default/Extensions/odfafepnkmbhccpbejgmiehpchacaeak/1.62.0_0');
+const PIXIV_LINKS_PATH = path.resolve(process.env.DATA_DIR || path.join(__dirname, '../../data'), 'pixivLinks.json');
 
 const PIXIV_USERNAME = process.env.PIXIV_USERNAME;
 const PIXIV_PASSWORD = process.env.PIXIV_PASSWORD;
@@ -53,8 +53,6 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu'
                 ]
                 // Remove executablePath to use bundled Chromium
             };
