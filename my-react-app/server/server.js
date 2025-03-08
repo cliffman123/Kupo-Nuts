@@ -1,7 +1,7 @@
 require('dotenv').config(); // Ensure this is at the top
 const express = require('express');
 const bodyParser = require('body-parser');
-const cors = require('cors'); // Import the cors middleware
+const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const passwordUtils = require('./passwordUtils');
@@ -9,64 +9,104 @@ const jwt = require('jsonwebtoken');
 const session = require('express-session');
 const cookieParser = require('cookie-parser');
 const { scrapeVideos } = require('./scraper');
-const axios = require('axios'); // Add this line to import axios
+const axios = require('axios');
 
 const app = express();
-const PORT = process.env.PORT || 5000; // Change port to 5000m 3000 to 5000
+const PORT = process.env.PORT || 5000;
 
+// Constants
 const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_TIME = 15 * 60 * 1000; // 15 minutes
 
-app.use((req, res, next) => {
-    // Get the origin from request headers
-    const origin = req.headers.origin;
-    
-    const allowedOrigins = [
-        'http://localhost:3000', 
-        'http://localhost:5000', 
-        'https://cliffman123.github.io',
-        'https://cliffman123.github.io/Kupo-Nuts', 
-        'https://cliffman123.github.io/Kupo-Nuts/', 
-        'https://kupo-nuts-frontend.onrender.com',
-        'https://kupo-nuts.onrender.com'
-    ];
-    
-    // Set CORS headers based on origin
-    if (allowedOrigins.includes(origin)) {
-        res.header('Access-Control-Allow-Origin', origin);
-        res.header('Access-Control-Allow-Credentials', 'true');
-        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-        res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
-    } else {
-        console.log(`Origin not in allowed list: ${origin}`);
+// In-memory storage
+const users = {};
+const loginAttempts = {};
+
+// Helper functions for file paths and user data
+const getDataDir = () => path.join(__dirname, '../../data');
+const getUsersDir = () => path.join(getDataDir(), 'users');
+
+const getUserDir = (username) => {
+    const dir = path.join(getUsersDir(), username);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true, mode: 0o755 });
     }
-    
-    // Handle preflight OPTIONS requests immediately
-    if (req.method === 'OPTIONS') {
-        console.log('Handling OPTIONS preflight request');
-        return res.status(204).end();
+    return dir;
+};
+
+const getUserFilePath = (username, fileType) => {
+    return path.join(getUserDir(username), `${fileType}.json`);
+};
+
+const initializeUserFiles = (username) => {
+    try {
+        const linksPath = getUserFilePath(username, 'links');
+        const scrapeLinksPath = getUserFilePath(username, 'scrape-links');
+        
+        if (!fs.existsSync(linksPath)) {
+            fs.writeFileSync(linksPath, '[]', 'utf8');
+        }
+        if (!fs.existsSync(scrapeLinksPath)) {
+            fs.writeFileSync(scrapeLinksPath, '[]', 'utf8');
+        }
+    } catch (error) {
+        console.error(`Error initializing files for user ${username}:`, error);
+        throw new Error(`Cannot initialize user files: ${error.message}`);
     }
-    
-    next();
+};
+
+// Initialize allowed origins
+const allowedOrigins = [
+    'http://localhost:3000', 
+    'http://localhost:5000', 
+    'https://cliffman123.github.io',
+    'https://cliffman123.github.io/Kupo-Nuts', 
+    'https://cliffman123.github.io/Kupo-Nuts/', 
+    'https://kupo-nuts-frontend.onrender.com',
+    'https://kupo-nuts.onrender.com'
+];
+
+// CORS configuration
+const corsOptions = {
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            console.log(`Origin not in allowed list: ${origin}`);
+            callback(null, false);
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
+
+// Cookie and session configuration
+const getCookieOptions = () => ({
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    path: '/',
+    maxAge: 24 * 60 * 60 * 1000 // 24 hours
 });
 
-// Move these middleware after the CORS middleware
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: false,
-    cookie: {
-        secure: false, // Set to false for local HTTP
-        sameSite: 'lax',
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    }
+    cookie: getCookieOptions()
 }));
 
 app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
 app.use(cookieParser());
 
-// Authentication middleware
+// Middleware for authentication and validation
 const authenticateToken = (req, res, next) => {
     const token = req.cookies.token;
 
@@ -80,13 +120,24 @@ const authenticateToken = (req, res, next) => {
         
         // Check if user exists in our users object
         if (!users[user.username]) {
+            // If user isn't loaded yet but folder exists, add it now
+            const userDir = getUserDir(user.username);
+            if (fs.existsSync(userDir)) {
+                users[user.username] = {
+                    password: "$2b$10$defaulthashforlegacyusers",
+                    createdAt: new Date()
+                };
+                console.log(`Added missing user from token: ${user.username}`);
+                next();
+                return;
+            }
             return res.status(401).json({ message: 'User not found' });
         }
         
         next();
     } catch (err) {
         console.error('Token verification error:', err);
-        res.clearCookie('token');
+        res.clearCookie('token', getCookieOptions());
         return res.status(403).json({ message: 'Invalid or expired token' });
     }
 };
@@ -109,69 +160,70 @@ const validatePassword = (req, res, next) => {
     next();
 };
 
-// User storage (replace with database in production)
-const users = {};
-
-// Rate limiting for login attempts
-const loginAttempts = {};
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_TIME = 15 * 60 * 1000; // 15 minutes
-
-// Login rate limiting middleware
 const checkLoginAttempts = (req, res, next) => {
     const ip = req.ip;
     const currentTime = Date.now();
 
-    if (loginAttempts[ip]) {
-        if (loginAttempts[ip].attempts >= MAX_LOGIN_ATTEMPTS) {
-            if (currentTime - loginAttempts[ip].lastAttempt < LOCKOUT_TIME) {
-                return res.status(429).json({
-                    message: 'Too many login attempts. Please try again later.',
-                    waitTime: Math.ceil((LOCKOUT_TIME - (currentTime - loginAttempts[ip].lastAttempt)) / 1000 / 60)
-                });
-            } else {
-                // Reset attempts after lockout period
-                loginAttempts[ip].attempts = 0;
-            }
+    if (!loginAttempts[ip]) {
+        loginAttempts[ip] = { attempts: 0, lastAttempt: currentTime };
+    }
+
+    if (loginAttempts[ip].attempts >= MAX_LOGIN_ATTEMPTS) {
+        if (currentTime - loginAttempts[ip].lastAttempt < LOCKOUT_TIME) {
+            return res.status(429).json({
+                message: 'Too many login attempts. Please try again later.',
+                waitTime: Math.ceil((LOCKOUT_TIME - (currentTime - loginAttempts[ip].lastAttempt)) / 1000 / 60)
+            });
+        } else {
+            // Reset attempts after lockout period
+            loginAttempts[ip].attempts = 0;
         }
     }
     next();
 };
 
-// Add these helper functions after the existing constants
-// Update getUserFilePath function to use a directory with proper permissions
-const getUserFilePath = (username, fileType) => {
-    // Use a directory that pptruser can write to
-    const userDir = path.join(__dirname, '../../data/users', username);
+// Load existing user data
+const loadExistingUsers = () => {
     try {
-        if (!fs.existsSync(userDir)) {
-            fs.mkdirSync(userDir, { recursive: true, mode: 0o755 });
+        const usersDir = getUsersDir();
+        if (!fs.existsSync(usersDir)) {
+            fs.mkdirSync(usersDir, { recursive: true, mode: 0o755 });
+            return;
         }
-        return path.join(userDir, `${fileType}.json`);
-    } catch (error) {
-        console.error(`Error creating directory for user ${username}:`, error);
-        throw new Error(`Cannot create user directory: ${error.message}`);
-    }
-};
-
-const initializeUserFiles = (username) => {
-    try {
-        const linksPath = getUserFilePath(username, 'links');
-        const scrapeLinksPath = getUserFilePath(username, 'scrape-links');
         
-        if (!fs.existsSync(linksPath)) {
-            fs.writeFileSync(linksPath, '[]', 'utf8');
-        }
-        if (!fs.existsSync(scrapeLinksPath)) {
-            fs.writeFileSync(scrapeLinksPath, '[]', 'utf8');
-        }
+        const userFolders = fs.readdirSync(usersDir);
+        console.log(`Found ${userFolders.length} user folders`);
+        
+        userFolders.forEach(username => {
+            try {
+                const passwordPath = path.join(usersDir, username, 'password.txt');
+                
+                if (fs.existsSync(passwordPath)) {
+                    const passwordHash = fs.readFileSync(passwordPath, 'utf8').trim();
+                    users[username] = {
+                        password: passwordHash,
+                        createdAt: new Date()
+                    };
+                } else {
+                    users[username] = {
+                        password: "$2b$10$defaulthashforlegacyusers",
+                        createdAt: new Date()
+                    };
+                    fs.mkdirSync(path.join(usersDir, username), { recursive: true });
+                    fs.writeFileSync(passwordPath, users[username].password);
+                }
+            } catch (err) {
+                console.error(`Error loading user ${username}:`, err);
+            }
+        });
+        
+        console.log(`Loaded ${Object.keys(users).length} users`);
     } catch (error) {
-        console.error(`Error initializing files for user ${username}:`, error);
-        throw new Error(`Cannot initialize user files: ${error.message}`);
+        console.error('Error loading existing users:', error);
     }
 };
 
-// Authentication endpoints
+// API Routes - Authentication
 app.post('/api/register', validatePassword, async (req, res) => {
     try {
         const { username, password } = req.body;
@@ -190,8 +242,10 @@ app.post('/api/register', validatePassword, async (req, res) => {
             createdAt: new Date()
         };
 
-        // Initialize user files
         initializeUserFiles(username);
+        
+        const passwordPath = path.join(getUserDir(username), 'password.txt');
+        fs.writeFileSync(passwordPath, hashedPassword);
 
         res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
@@ -200,15 +254,12 @@ app.post('/api/register', validatePassword, async (req, res) => {
     }
 });
 
-// Update cookie settings for cross-domain access with GitHub Pages
 app.post('/api/login', checkLoginAttempts, async (req, res) => {
     try {
         const { username, password } = req.body;
         const ip = req.ip;
-
-        if (!loginAttempts[ip]) {
-            loginAttempts[ip] = { attempts: 0, lastAttempt: Date.now() };
-        }
+        
+        loginAttempts[ip] = loginAttempts[ip] || { attempts: 0, lastAttempt: Date.now() };
 
         if (!username || !password) {
             loginAttempts[ip].attempts++;
@@ -233,31 +284,13 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
         // Reset login attempts on successful login
         loginAttempts[ip].attempts = 0;
 
-        // Create JWT token
         const token = jwt.sign(
             { username },
             process.env.JWT_SECRET || 'your-jwt-secret',
             { expiresIn: '24h' }
         );
 
-        // Log detailed cookie setup info for debugging
-        console.log('Setting authentication cookie with following properties:');
-        console.log('- Environment:', process.env.NODE_ENV);
-        console.log('- Is secure:', process.env.NODE_ENV === 'production');
-        console.log('- Origin:', req.headers.origin);
-        
-        // Modified cookie settings for broader browser compatibility
-        const cookieOptions = {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production' ? true : false,
-            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-            path: '/',
-            maxAge: 24 * 60 * 60 * 1000 // 24 hours
-        };
-
-        console.log('Cookie options:', cookieOptions);
-        res.cookie('token', token, cookieOptions);
-
+        res.cookie('token', token, getCookieOptions());
         res.json({ message: 'Login successful' });
     } catch (error) {
         console.error('Login error:', error);
@@ -265,19 +298,8 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
     }
 });
 
-// Update logout endpoint to better handle cookie clearing
 app.post('/api/logout', (req, res) => {
-    console.log('Logout requested, clearing token cookie');
-    
-    // Clear cookie with same options that were used when setting it
-    const cookieOptions = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production' ? true : false,
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        path: '/'
-    };
-    
-    res.clearCookie('token', cookieOptions);
+    res.clearCookie('token', getCookieOptions());
     
     if (req.session) {
         req.session.destroy(err => {
@@ -290,23 +312,19 @@ app.post('/api/logout', (req, res) => {
     res.json({ message: 'Logout successful' });
 });
 
-// Protected route example
+// API Routes - User Profile
 app.get('/api/profile', authenticateToken, (req, res) => {
     res.json({ username: req.user.username });
 });
 
-let isScraping = false; // Add a flag to indicate if scraping is in progress
-
-// Simplified scrape endpoint without WebSockets
+// API Routes - Media Management
 app.post('/api/scrape', authenticateToken, async (req, res) => {
     const { url } = req.body;
     const username = req.user.username;
 
     try {
         console.log(`Starting scrape for user ${username} with URL: ${url}`);
-        
         const result = await scrapeVideos(url, null, username);
-        
         console.log('Scrape completed with result:', result);
 
         res.status(200).json({
@@ -324,14 +342,9 @@ app.post('/api/remove', authenticateToken, (req, res) => {
     const filePath = getUserFilePath(req.user.username, 'links');
 
     try {
-        // Read the current links
         let data = fs.readFileSync(filePath, 'utf8');
         let links = JSON.parse(data);
-
-        // Filter out the entire entry with matching postLink
         links = links.filter(link => link.postLink !== postLink);
-
-        // Write the updated links back to the file
         fs.writeFileSync(filePath, JSON.stringify(links, null, 2), 'utf8');
         
         res.status(200).json({ message: 'Media removed successfully' });
@@ -341,81 +354,57 @@ app.post('/api/remove', authenticateToken, (req, res) => {
     }
 });
 
-const fetchUserId = async (username, bearerToken) => {
-    const response = await axios.get(`https://api.twitter.com/2/users/by/username/${username}`, {
-        headers: {
-            'Authorization': `Bearer ${bearerToken}`
-        }
-    });
-    return response.data.data.id;
-};
+// API Routes - Twitter Integration
+const twitterAPI = {
+    fetchUserId: async (username, bearerToken) => {
+        const response = await axios.get(`https://api.twitter.com/2/users/by/username/${username}`, {
+            headers: { 'Authorization': `Bearer ${bearerToken}` }
+        });
+        return response.data.data.id;
+    },
 
-const fetchTweetsFromUser = async (userId, bearerToken) => {
-    const response = await axios.get(`https://api.twitter.com/2/users/${userId}/tweets`, {
-        headers: {
-            'Authorization': `Bearer ${bearerToken}`
-        },
-        params: {
-            max_results: 10
-        }
-    });
-    return response.data;
+    fetchTweetsFromUser: async (userId, bearerToken) => {
+        const response = await axios.get(`https://api.twitter.com/2/users/${userId}/tweets`, {
+            headers: { 'Authorization': `Bearer ${bearerToken}` },
+            params: { max_results: 10 }
+        });
+        return response.data;
+    }
 };
 
 app.post('/api/tweets', authenticateToken, async (req, res) => {
     const { username: twitterUsername } = req.body;
     const bearerToken = "AAAAAAAAAAAAAAAAAAAAAG9%2BxgEAAAAAtjKb7XVERP0DVHozG3IHPO6LzdY%3DLLC1iZj2xdpGLAgrLUAZeOmMIPpI0HLpHN5qeqY7Blvba1YQnI";
 
-    console.log('UserName', twitterUsername); // Log the username to the console
-
     if (!bearerToken) {
-        console.error('TWITTER_BEARER_TOKEN is not set');
         return res.status(500).json({ error: 'Server configuration error' });
     }
 
     try {
-        const userId = await fetchUserId(twitterUsername, bearerToken);
-        const response = await fetchTweetsFromUser(userId, bearerToken);
+        const userId = await twitterAPI.fetchUserId(twitterUsername, bearerToken);
+        const response = await twitterAPI.fetchTweetsFromUser(userId, bearerToken);
         const tweetIds = response.data.map(tweet => tweet.id);
-        console.log('Fetched tweet IDs:', tweetIds);
-
-        // Read the existing links from links.json
+        
         const filePath = getUserFilePath(req.user.username, 'links');
-        fs.readFile(filePath, 'utf8', (err, data) => {
-            if (err) {
-                console.error('Error reading file:', err);
-                return res.status(500).json({ error: 'Internal Server Error' });
-            }
+        const data = fs.readFileSync(filePath, 'utf8');
+        let links = JSON.parse(data);
 
-            let links = JSON.parse(data);
-
-            // Add new tweet links to the existing links
-            tweetIds.forEach(id => {
-                links.push({
-                    postLink: `https://twitter.com/i/status/${id}`,
-                    videoLinks: `https://d.fixupx.com/i/status/${id}.mp4`
-                });
-            });
-
-            // Write the updated links back to links.json
-            fs.write(filePath, JSON.stringify(links, null, 2), 'utf8', (err) => {
-                if (err) {
-                    console.error('Error writing file:', err);
-                    return res.status(500).json({ error: 'Internal Server Error' });
-                }
-
-                res.json(response.data);
+        tweetIds.forEach(id => {
+            links.push({
+                postLink: `https://twitter.com/i/status/${id}`,
+                videoLinks: `https://d.fixupx.com/i/status/${id}.mp4`
             });
         });
+
+        fs.writeFileSync(filePath, JSON.stringify(links, null, 2), 'utf8');
+        res.json(response.data);
     } catch (error) {
-        console.error('Error fetching tweets:', error.message);
-        if (error.response) {
-            console.error('Response data:', error.response.data);
-        }
+        console.error('Error fetching tweets:', error);
         res.status(500).json({ error: 'Failed to fetch tweets' });
     }
 });
 
+// API Routes - Scraping Management
 const scrapeSavedLinks = async (username) => {
     const filePath = getUserFilePath(username, 'scrape-links');
     if (!fs.existsSync(filePath)) {
@@ -434,14 +423,6 @@ const scrapeSavedLinks = async (username) => {
     }
 };
 
-// // Call scrapeSavedLinks once when the server starts
-// scrapeSavedLinks().then(() => {
-//     // Set interval to call scrapeSavedLinks every 6 hours
-//     setInterval(scrapeSavedLinks, 6 * 60 * 60 * 1000); // 6 hours in milliseconds
-// }).catch(error => {
-//     console.error('Error during initial scrape:', error);
-// });
-
 app.post('/api/scrape-saved-links', authenticateToken, async (req, res) => {
     try {
         await scrapeSavedLinks(req.user.username);
@@ -456,69 +437,46 @@ app.post('/api/save-scrape-url', authenticateToken, (req, res) => {
     const { url } = req.body;
     const filePath = getUserFilePath(req.user.username, 'scrape-links');
 
-    fs.readFile(filePath, 'utf8', (err, data) => {
-        if (err) {
-            console.error('Error reading file:', err);
-            return res.status(500).json({ error: 'Internal Server Error' });
-        }
-
-        let links;
-        try {
-            links = data ? JSON.parse(data) : [];
-        } catch (parseError) {
-            console.error('Error parsing JSON:', parseError);
-            return res.status(500).json({ error: 'Internal Server Error' });
-        }
+    try {
+        const data = fs.readFileSync(filePath, 'utf8');
+        let links = JSON.parse(data);
 
         if (links.includes(url)) {
             return res.status(400).json({ message: 'URL already exists' });
         }
 
         links.push(url);
-
-        fs.writeFile(filePath, JSON.stringify(links, null, 2), 'utf8', (err) => {
-            if (err) {
-                console.error('Error writing file:', err);
-                return res.status(500).json({ error: 'Internal Server Error' });
-            }
-
-            res.status(200).json({ message: 'URL saved successfully' });
-        });
-    });
+        fs.writeFileSync(filePath, JSON.stringify(links, null, 2), 'utf8');
+        res.status(200).json({ message: 'URL saved successfully' });
+    } catch (error) {
+        console.error('Error saving scrape URL:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
 });
 
-// Add new endpoint to fetch user's media
+// API Routes - Media Access
 app.get('/api/media', authenticateToken, (req, res) => {
     const filePath = getUserFilePath(req.user.username, 'links');
     
     if (!fs.existsSync(filePath)) {
-        // Initialize empty links file if it doesn't exist
         fs.writeFileSync(filePath, '[]', 'utf8');
         return res.json([]);
     }
     
-    fs.readFile(filePath, 'utf8', (err, data) => {
-        if (err) {
-            console.error('Error reading file:', err);
-            return res.status(500).json({ error: 'Internal Server Error' });
-        }
-
-        try {
-            const links = JSON.parse(data);
-            // Filter out any invalid entries
-            const validLinks = links.filter(link => link && link.postLink && link.videoLinks);
-            res.json(validLinks);
-        } catch (error) {
-            console.error('Error parsing JSON:', error);
-            res.status(500).json({ error: 'Internal Server Error' });
-        }
-    });
+    try {
+        const data = fs.readFileSync(filePath, 'utf8');
+        const links = JSON.parse(data);
+        const validLinks = links.filter(link => link && link.postLink && link.videoLinks);
+        res.json(validLinks);
+    } catch (error) {
+        console.error('Error reading media:', error);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
 });
 
-// Add new endpoint to fetch just the latest media (for incremental updates)
 app.get('/api/media/latest', authenticateToken, (req, res) => {
     const filePath = getUserFilePath(req.user.username, 'links');
-    const count = parseInt(req.query.count) || 10; // Default to 10 latest items
+    const count = parseInt(req.query.count) || 10;
     
     if (!fs.existsSync(filePath)) {
         return res.json([]);
@@ -527,9 +485,8 @@ app.get('/api/media/latest', authenticateToken, (req, res) => {
     try {
         const data = fs.readFileSync(filePath, 'utf8');
         const links = JSON.parse(data);
-        // Return the latest `count` number of links (based on position in array)
         const validLinks = links.filter(link => link && link.postLink && link.videoLinks);
-        const latestLinks = validLinks.slice(-count); // Get the most recent ones from the end
+        const latestLinks = validLinks.slice(-count);
         res.json(latestLinks);
     } catch (error) {
         console.error('Error fetching latest media:', error);
@@ -537,13 +494,13 @@ app.get('/api/media/latest', authenticateToken, (req, res) => {
     }
 });
 
-// Add new endpoints for import/export
+// API Routes - Import/Export
 app.get('/api/export-links', authenticateToken, (req, res) => {
     const filePath = getUserFilePath(req.user.username, 'links');
     
     try {
         if (!fs.existsSync(filePath)) {
-            return res.json([]); // Return empty array if file doesn't exist
+            return res.json([]);
         }
         
         const data = fs.readFileSync(filePath, 'utf8');
@@ -565,7 +522,6 @@ app.post('/api/import-links', authenticateToken, (req, res) => {
             return res.status(400).json({ error: 'Invalid format: expected array' });
         }
 
-        // Normalize links format
         const validLinks = newLinks.map(link => ({
             postLink: link.postLink,
             videoLinks: Array.isArray(link.videoLinks) ? link.videoLinks : [link.videoLinks]
@@ -581,7 +537,6 @@ app.post('/api/import-links', authenticateToken, (req, res) => {
             return res.status(400).json({ error: 'No valid links found in import file' });
         }
 
-        // Replace existing links with the imported ones
         fs.writeFileSync(filePath, JSON.stringify(validLinks, null, 2), 'utf8');
         
         res.json({ 
@@ -594,63 +549,23 @@ app.post('/api/import-links', authenticateToken, (req, res) => {
     }
 });
 
-app.post('/api/similar', authenticateToken, async (req, res) => {
-    const { url } = req.body;
-    const username = req.user.username;
-
+app.get('/api/export-scrape-list', authenticateToken, (req, res) => {
+    const filePath = getUserFilePath(req.user.username, 'scrape-links');
+    
     try {
-        console.log(`Testing navigation to: ${url}`);
-        
-        // First run a test to check if we can reach the URL
-        const testResult = await testScraper.runTest(url);
-        
-        if (!testResult.success) {
-            console.error(`Navigation test failed: ${testResult.message}`);
-            return res.status(400).json({ 
-                message: `Failed to navigate to the target URL: ${testResult.message}`,
-                count: 0
-            });
+        if (!fs.existsSync(filePath)) {
+            return res.json([]);
         }
         
-        console.log('Navigation test successful, proceeding with similar posts search');
-        
-        // Get initial count
-        const userLinksPath = path.join(__dirname, '../build/users', username, 'links.json');
-        const initialCount = fs.existsSync(userLinksPath) ? 
-            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
-
-        console.log(`Finding similar posts for user ${username} from post: ${url}`);
-        
-        // After successful test, proceed with the standard scrapeVideos function
-        await scrapeVideos(url, null, username);
-        
-        // Get final count
-        const finalCount = fs.existsSync(userLinksPath) ? 
-            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
-        
-        // Calculate new links added
-        const count = finalCount - initialCount;
-
-        if (count === 0) {
-            return res.status(200).json({
-                message: 'No new similar posts found',
-                count: 0
-            });
-        }
-
-        res.status(200).json({ 
-            message: 'Similar posts found successfully', 
-            count 
-        });
+        const data = fs.readFileSync(filePath, 'utf8');
+        const links = JSON.parse(data);
+        res.json(links);
     } catch (error) {
-        console.error('Error finding similar posts:', error);
-        res.status(500).json({ 
-            message: error.message || 'Failed to find similar posts'
-        });
+        console.error('Error exporting scrape list:', error);
+        res.status(500).json({ error: 'Failed to export scrape list' });
     }
 });
 
-// Add new endpoint for importing scrape list
 app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
     const filePath = getUserFilePath(req.user.username, 'scrape-links');
     
@@ -661,7 +576,6 @@ app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Invalid format: expected array' });
         }
 
-        // Validate URLs
         const validLinks = newLinks.filter(link => 
             typeof link === 'string' && 
             (link.startsWith('http://') || link.startsWith('https://'))
@@ -671,10 +585,7 @@ app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'No valid URLs found in import file' });
         }
 
-        // Always replace the existing file
         fs.writeFileSync(filePath, JSON.stringify(validLinks, null, 2), 'utf8');
-        
-        // Automatically start scraping the new links
         await scrapeSavedLinks(req.user.username);
         
         res.json({ 
@@ -687,28 +598,46 @@ app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
     }
 });
 
-// Add endpoint to export scrape list
-app.get('/api/export-scrape-list', authenticateToken, (req, res) => {
-    const filePath = getUserFilePath(req.user.username, 'scrape-links');
-    
+// API Routes - Similar Content
+app.post('/api/similar', authenticateToken, async (req, res) => {
+    const { url } = req.body;
+    const username = req.user.username;
+
     try {
-        if (!fs.existsSync(filePath)) {
-            return res.json([]); // Return empty array if file doesn't exist
+        if (!url) {
+            return res.status(400).json({ message: 'URL is required' });
         }
         
-        const data = fs.readFileSync(filePath, 'utf8');
-        const links = JSON.parse(data);
-        res.json(links);
+        // Fix: There seems to be a missing testScraper reference
+        // Assuming it's a module like scrapeVideos and should be imported
+        // For now, we'll just use the scrapeVideos function
+        
+        const userLinksPath = getUserFilePath(username, 'links');
+        const initialCount = fs.existsSync(userLinksPath) ? 
+            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
+
+        await scrapeVideos(url, null, username);
+        
+        const finalCount = fs.existsSync(userLinksPath) ? 
+            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
+        
+        const count = finalCount - initialCount;
+
+        res.status(200).json({ 
+            message: count > 0 ? 'Similar posts found successfully' : 'No new similar posts found', 
+            count 
+        });
     } catch (error) {
-        console.error('Error exporting scrape list:', error);
-        res.status(500).json({ error: 'Failed to export scrape list' });
+        console.error('Error finding similar posts:', error);
+        res.status(500).json({ 
+            message: error.message || 'Failed to find similar posts'
+        });
     }
 });
 
-// Serve static files from the React app
+// Serve static files and setup catch-all route
 app.use(express.static(path.join(__dirname, '../build')));
 
-// Add a root endpoint
 app.get('/', (req, res) => {
     res.send({
         status: 'online',
@@ -717,75 +646,12 @@ app.get('/', (req, res) => {
     });
 });
 
-// Fix the catch-all route - there appears to be corruption in this section
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../build', 'index.html'));
 });
 
-// Replace the clearUserData function with a function that ensures directories exist
-const ensureDataDirectories = () => {
-    const dataDir = path.join(__dirname, '../../data');
-    const usersDir = path.join(dataDir, 'users');
-    
-    try {
-        // Create data directory if it doesn't exist
-        if (!fs.existsSync(dataDir)) {
-            fs.mkdirSync(dataDir, { recursive: true, mode: 0o755 });
-            console.log('Created data directory');
-        }
-        
-        // Create users directory if it doesn't exist
-        if (!fs.existsSync(usersDir)) {
-            fs.mkdirSync(usersDir, { mode: 0o755 });
-            console.log('Created users directory');
-        }
-        
-        // Load existing users from disk
-        loadExistingUsers(usersDir);
-        
-    } catch (error) {
-        console.error('Error during directory setup:', error);
-    }
-};
-
-// Function to load existing users from disk
-const loadExistingUsers = (usersDir) => {
-    try {
-        const userFolders = fs.readdirSync(usersDir);
-        
-        console.log(`Found ${userFolders.length} user folders`);
-        
-        userFolders.forEach(username => {
-            // Create a placeholder entry for each user
-            // The actual password verification will still use the stored hashed passwords
-            users[username] = {
-                createdAt: new Date(),
-                password: "placeholder" // Will be checked against saved hash files
-            };
-        });
-        
-        console.log(`Loaded ${Object.keys(users).length} users`);
-    } catch (error) {
-        console.error('Error loading existing users:', error);
-    }
-};
-
-// Replace clearUserData() call with ensureDataDirectories()
-ensureDataDirectories();
-
-// For production on Render, ensure cookies work properly
-if (process.env.NODE_ENV === 'production') {
-    app.use(session({
-        secret: process.env.SESSION_SECRET || 'your-secret-key',
-        resave: false,
-        saveUninitialized: false,
-        cookie: {
-            secure: true, // Use true in production with HTTPS
-            sameSite: 'none', // Required for cross-site cookies
-            maxAge: 24 * 60 * 60 * 1000 // 24 hours
-        }
-    }));
-}
+// Initialize server
+loadExistingUsers();
 
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on port ${PORT}`);
