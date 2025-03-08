@@ -17,12 +17,9 @@ const PORT = process.env.PORT || 5000; // Change port to 5000m 3000 to 5000
 const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
 
-// Move the CORS middleware to the top, before other middleware
-// Update CORS configuration to be more permissive
 app.use((req, res, next) => {
     // Get the origin from request headers
     const origin = req.headers.origin;
-    console.log(`Received request from origin: ${origin}`);
     
     const allowedOrigins = [
         'http://localhost:3000', 
@@ -36,7 +33,6 @@ app.use((req, res, next) => {
     
     // Set CORS headers based on origin
     if (allowedOrigins.includes(origin)) {
-        console.log(`Setting CORS headers for allowed origin: ${origin}`);
         res.header('Access-Control-Allow-Origin', origin);
         res.header('Access-Control-Allow-Credentials', 'true');
         res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
