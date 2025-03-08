@@ -220,7 +220,7 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
         await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
         
         // 3. SMART WAITING - Wait for content to load
-        await page.waitForSelector('a', { timeout: 10000 });
+        await page.waitForSelector('a', { timeout: 50000 });
         
         // Scroll to load lazy content if needed
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
@@ -334,7 +334,7 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
         // 3. SMART WAITING - Better navigation with proper waitUntil
         const response = await page.goto(jinaLink, { 
             waitUntil: 'domcontentloaded', // Faster than networkidle2
-            timeout: 30000 
+            timeout: 50000 
         });
         
         if (!response || response.status() === 404) {
@@ -351,7 +351,7 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
             // Wait for content to load before extraction
             await page.waitForFunction(() => {
                 return document.readyState === 'complete';
-            }, { timeout: 10000 });
+            }, { timeout: 50000 });
             
             mediaData = await extractMediaData(page, link, mediaSelectors);
         }
