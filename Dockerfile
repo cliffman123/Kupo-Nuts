@@ -9,9 +9,14 @@ COPY package*.json ./
 RUN npm ci
 COPY . .
 
-# Create data directory with proper permissions
+# Create both potential data directories with proper permissions
+# Local app directory data location
 RUN mkdir -p /usr/src/app/data/users && \
     chown -R pptruser:pptruser /usr/src/app/data
+
+# Render platform data location
+RUN mkdir -p /opt/render/project/src/data/users && \
+    chown -R pptruser:pptruser /opt/render/project/src/data
 
 # Debug: Print browser information
 RUN echo "Checking for browser executables:" && \
