@@ -722,36 +722,56 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../build', 'index.html'));
 });
 
-// Fix the clearUserData function - there appears to be corruption in this section
-const clearUserData = () => {
+// Replace the clearUserData function with a function that ensures directories exist
+const ensureDataDirectories = () => {
     const dataDir = path.join(__dirname, '../../data');
     const usersDir = path.join(dataDir, 'users');
     
     try {
+        // Create data directory if it doesn't exist
         if (!fs.existsSync(dataDir)) {
             fs.mkdirSync(dataDir, { recursive: true, mode: 0o755 });
+            console.log('Created data directory');
         }
         
-        if (fs.existsSync(usersDir)) {
-            console.log('Clearing user data...');
-            fs.rmSync(usersDir, { recursive: true, force: true });
+        // Create users directory if it doesn't exist
+        if (!fs.existsSync(usersDir)) {
             fs.mkdirSync(usersDir, { mode: 0o755 });
-            console.log('User data cleared successfully');
-        } else {
-            fs.mkdirSync(usersDir, { mode: 0o755 });
+            console.log('Created users directory');
         }
         
-        // Reset users object
-        Object.keys(users).forEach(key => delete users[key]);
-        console.log('Users object reset');
+        // Load existing users from disk
+        loadExistingUsers(usersDir);
+        
     } catch (error) {
-        console.error('Error during clearUserData:', error);
-        // Don't throw here, just log the error and continue
+        console.error('Error during directory setup:', error);
     }
 };
 
-// Clear user data when server starts
-clearUserData();
+// Function to load existing users from disk
+const loadExistingUsers = (usersDir) => {
+    try {
+        const userFolders = fs.readdirSync(usersDir);
+        
+        console.log(`Found ${userFolders.length} user folders`);
+        
+        userFolders.forEach(username => {
+            // Create a placeholder entry for each user
+            // The actual password verification will still use the stored hashed passwords
+            users[username] = {
+                createdAt: new Date(),
+                password: "placeholder" // Will be checked against saved hash files
+            };
+        });
+        
+        console.log(`Loaded ${Object.keys(users).length} users`);
+    } catch (error) {
+        console.error('Error loading existing users:', error);
+    }
+};
+
+// Replace clearUserData() call with ensureDataDirectories()
+ensureDataDirectories();
 
 // For production on Render, ensure cookies work properly
 if (process.env.NODE_ENV === 'production') {
