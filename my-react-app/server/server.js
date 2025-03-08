@@ -17,7 +17,44 @@ const PORT = process.env.PORT || 5000; // Change port to 5000m 3000 to 5000
 const PASSWORD_MIN_LENGTH = 12;
 const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/;
 
-// Session configuration
+// Move the CORS middleware to the top, before other middleware
+// Update CORS configuration to be more permissive
+app.use((req, res, next) => {
+    // Get the origin from request headers
+    const origin = req.headers.origin;
+    console.log(`Received request from origin: ${origin}`);
+    
+    const allowedOrigins = [
+        'http://localhost:3000', 
+        'http://localhost:5000', 
+        'https://cliffman123.github.io',
+        'https://cliffman123.github.io/Kupo-Nuts', 
+        'https://cliffman123.github.io/Kupo-Nuts/', 
+        'https://kupo-nuts-frontend.onrender.com',
+        'https://kupo-nuts.onrender.com'
+    ];
+    
+    // Set CORS headers based on origin
+    if (allowedOrigins.includes(origin)) {
+        console.log(`Setting CORS headers for allowed origin: ${origin}`);
+        res.header('Access-Control-Allow-Origin', origin);
+        res.header('Access-Control-Allow-Credentials', 'true');
+        res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+        res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    } else {
+        console.log(`Origin not in allowed list: ${origin}`);
+    }
+    
+    // Handle preflight OPTIONS requests immediately
+    if (req.method === 'OPTIONS') {
+        console.log('Handling OPTIONS preflight request');
+        return res.status(204).end();
+    }
+    
+    next();
+});
+
+// Move these middleware after the CORS middleware
 app.use(session({
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
@@ -28,36 +65,6 @@ app.use(session({
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
 }));
-
-// Update CORS configuration to support GitHub Pages and credentials
-app.use((req, res, next) => {
-    // Get the origin from request headers
-    const origin = req.headers.origin;
-    const allowedOrigins = [
-        'http://localhost:3000', 
-        'http://localhost:5000', 
-        'https://cliffman123.github.io',
-        'https://cliffman123.github.io/Kupo-Nuts', // Without trailing slash
-        'https://cliffman123.github.io/Kupo-Nuts/', // With trailing slash
-        'https://kupo-nuts-frontend.onrender.com',  // Frontend Render URL
-        'https://kupo-nuts.onrender.com'           // API Render URL
-    ];
-    
-    // Set CORS headers based on origin
-    if (allowedOrigins.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-        res.setHeader('Access-Control-Allow-Credentials', 'true');
-        res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, X-Requested-With');
-    }
-    
-    // Handle preflight OPTIONS requests
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(204);
-    }
-    
-    next();
-});
 
 app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
