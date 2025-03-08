@@ -26,10 +26,17 @@ const loginAttempts = {};
 
 // Helper functions for file paths and user data
 const getDataDir = () => {
-    // Use Render's persistent storage location if available
-    const renderDataDir = process.env.RENDER_SERVICE_NAME ? 
-        '/opt/render/project/src/data' : 
-        path.join(__dirname, '../../data');
+    // Use a directory path that pptruser has permission to access
+    let renderDataDir;
+    
+    if (process.env.RENDER_SERVICE_NAME) {
+        // When running on Render, use a directory inside the app directory
+        // pptruser definitely has permissions to this location
+        renderDataDir = path.join(__dirname, '../../data');
+    } else {
+        // In development or other environments
+        renderDataDir = path.join(__dirname, '../../data');
+    }
         
     // Create the directory if it doesn't exist
     if (!fs.existsSync(renderDataDir)) {
