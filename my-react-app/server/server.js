@@ -781,6 +781,15 @@ app.post('/api/similar', authenticateToken, async (req, res) => {
     }
 });
 
+// UptimeRobot Health Check Endpoint
+app.get('/api/health', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
+});
+
 // Serve static files and setup catch-all route
 app.use(express.static(path.join(__dirname, '../build')));
 
