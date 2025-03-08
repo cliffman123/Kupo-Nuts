@@ -5,7 +5,11 @@ const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { exec } = require('child_process');
 require('dotenv').config();
 
+// 1. IMPROVED RESOURCE MANAGEMENT - Add BlockResourcesPlugin
+const { createBlockResourcesPlugin } = require('./blockResourcesPlugin');
+const blockResourcesPlugin = createBlockResourcesPlugin(['image', 'stylesheet', 'font', 'media']);
 puppeteer.use(StealthPlugin());
+puppeteer.use(blockResourcesPlugin);
 
 const EDGE_PATH = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const LINKS_PATH = process.env.LINKS_PATH || 'C:\\Users\\cliff\\.vscode\\Website Project\\my-react-app\\build\\links.json';
@@ -32,6 +36,12 @@ const PIXIV_LINKS_PATH = path.resolve(process.env.DATA_DIR || path.join(__dirnam
 
 const PIXIV_USERNAME = process.env.PIXIV_USERNAME;
 const PIXIV_PASSWORD = process.env.PIXIV_PASSWORD;
+
+// Add rate limiting configuration
+const RATE_LIMIT = {
+  minTime: 500, // minimum time between requests in ms
+  maxConcurrent: 5 // maximum number of concurrent requests
+};
 
 // Replace loadCookies function with an empty implementation
 const loadCookies = async (page) => {
@@ -70,6 +80,18 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
             browser = await puppeteer.launch(launchOptions);
             const context = browser.defaultBrowserContext();
             page = await context.newPage();
+            
+            // 4. RESOURCE MANAGEMENT - Configure page for performance
+            await page.setRequestInterception(true);
+            page.on('request', request => {
+                const resourceType = request.resourceType();
+                if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font') {
+                    request.abort();
+                } else {
+                    request.continue();
+                }
+            });
+            
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
             await loadCookies(page); // Load cookies before doing anything
         }
@@ -95,42 +117,59 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
     }
 };
 
+// 2. EFFICIENT DATA STRUCTURES - Use Sets for faster lookups
 const readExistingLinks = () => {
     if (fs.existsSync(LINKS_PATH)) {
         const data = fs.readFileSync(LINKS_PATH, 'utf-8');
-        return JSON.parse(data);
+        const links = JSON.parse(data);
+        // Create a Set of post URLs for O(1) lookup
+        const linkSet = new Set(links.map(link => link.postLink));
+        return { links, linkSet };
     }
-    return [];
+    return { links: [], linkSet: new Set() };
 };
 
 const loginToPixiv = async (page, providedLink) => {
-    await page.goto(PIXIV_LOGIN_URL, {timeout: 180000 }); // Set timeout to 3 minutes (180000 ms)
+    await page.goto(PIXIV_LOGIN_URL, {
+        timeout: 180000,
+        waitUntil: 'networkidle2'
+    });
 
     if (page.url().includes('https://www.pixiv.net/en/')) {
         console.log('Already logged in to Pixiv.');
         return;
     }
 
+    // Wait for username field to be visible before typing
+    await page.waitForSelector('input[type="text"]', { visible: true });
     await page.type('input[type="text"]', "cliffman123@gmail.com");
-    await new Promise(resolve => setTimeout(resolve, 1000)); //Wait for 1 second
+    
+    // Wait for password field to be visible
+    await page.waitForSelector('input[type="password"]', { visible: true });
     await page.type('input[type="password"]', "$piralKnights7");
-    await new Promise(resolve => setTimeout(resolve, 1000)); //Wait for 1 second
-    await page.click('#app-mount-point > div > div > div.sc-fvq2qx-4.csnYja > div.sc-2oz7me-0.bOKfsa > form > button.charcoal-button.sc-2o1uwj-10.ldVSLT');
+    
+    // Wait for login button and click it
+    const loginButtonSelector = '#app-mount-point > div > div > div.sc-fvq2qx-4.csnYja > div.sc-2o1uwj-0.bOKfsa > form > button.charcoal-button.sc-2o1uwj-10.ldVSLT';
+    await page.waitForSelector(loginButtonSelector, { visible: true });
+    await page.click(loginButtonSelector);
+    
     console.log('Logging in to Pixiv...');
 
-    while (true) {
-        const currentUrl = page.url();
-        if (currentUrl.includes('https://www.pixiv.net/en/')) {
-            console.log('Successfully navigating to the Pixiv discovery page.');
-            // Remove cookie saving to prevent protocol errors
-            // const cookies = await page.cookies();
-            // fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
-            // console.log('Cookies saved to', COOKIES_PATH);
-            return;
-        }
-        await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
+    // Wait for navigation to complete after login
+    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
+    
+    if (page.url().includes('https://www.pixiv.net/en/')) {
+        console.log('Successfully logged in to Pixiv.');
+        return;
+    } else {
+        console.log('Waiting for complete login...');
+        // More robust wait for successful login
+        await page.waitForFunction(() => {
+            return window.location.href.includes('https://www.pixiv.net/en/');
+        }, { timeout: 60000 });
+        console.log('Login completed successfully');
     }
-}
+};
 
 const navigateToFeed = async (page, providedLink) => {
     if (providedLink){
@@ -158,6 +197,7 @@ const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLi
     return totalAdded;  // Return the total
 };
 
+// 1. PARALLEL PROCESSING - Process links in parallel batches
 const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, providedLink = null, username, progressCallback) => {
     let totalAdded = 0;  // Add counter
     let pageCount = 0;
@@ -173,11 +213,20 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
         'body > div.main_content.post_section > div.main_post.related_post > div.outer_post > div.post_image > div > img'
     ];
 
+    // 2. EFFICIENT DATA STRUCTURES - Use Set for faster duplicate checking
+    const existingLinkSet = new Set(existingLinks.map(link => link.postLink));
+
     while (pageCount < PAGE_TARGET) {
         await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
-        await randomWait();
+        
+        // 3. SMART WAITING - Wait for content to load
+        await page.waitForSelector('a', { timeout: 10000 });
+        
+        // Scroll to load lazy content if needed
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-        await randomWait();
+        
+        // Wait for any dynamic content to load after scrolling
+        await page.waitForTimeout(1000);
 
         const postLinks = await page.evaluate((providedLink) => {
             const links = Array.from(document.querySelectorAll('a'));
@@ -189,22 +238,41 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
             }
         }, providedLink);
 
-        const newPostLinks = postLinks.filter(link => !existingLinks.some(existingLink => existingLink.postLink === link));
+        // 2. EFFICIENT DATA STRUCTURES - Use Set for faster filtering
+        const newPostLinks = postLinks.filter(link => !existingLinkSet.has(link));
         postLinksQueue.push(...newPostLinks);
 
         if (newPostLinks.length === 0) {
             console.log('Nothing New Found, moving to the next saved link.');
             break;
         }
+        
+        // 1. PARALLEL PROCESSING - Process links in batches
+        const batchSize = RATE_LIMIT.maxConcurrent;
         while (postLinksQueue.length > 0) {
-            const link = postLinksQueue.shift();
-            const newLinks = await processLink(page, link, existingLinks, mediaSelectors, username, progressCallback);
-            totalAdded += newLinks;  // Add the new links to total
+            const batch = postLinksQueue.splice(0, batchSize);
             
-            // Call progress callback with current total
+            // Process batch in parallel
+            const results = await Promise.all(
+                batch.map(link => processLink(page.browser(), link, existingLinkSet, mediaSelectors, username, progressCallback))
+            );
+            
+            // Update existingLinkSet and totalAdded
+            results.forEach(result => {
+                if (result.mediaLink) {
+                    existingLinkSet.add(result.mediaLink.postLink);
+                    existingLinks.push(result.mediaLink);
+                }
+                totalAdded += result.linksAdded;
+            });
+            
+            // Call progress callback with batch total
             if (progressCallback) {
                 progressCallback(totalAdded);
             }
+            
+            // 4. RESOURCE MANAGEMENT - Rate limiting between batches
+            await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.minTime));
         }
 
         await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
@@ -213,12 +281,15 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
             await page.waitForSelector(nextPageSelector, { timeout: 2000 });
             if (feedPageUrl.includes('rule34video')) {
                 await page.click(nextPageSelector);
-                await randomWait();
+                // 3. SMART WAITING - Wait for navigation
+                await page.waitForNavigation({ waitUntil: 'networkidle2' });
             }
             else {
-                await page.click(nextPageSelector), { waitUntil: 'networkidle2' };
+                await page.click(nextPageSelector);
+                // 3. SMART WAITING - Wait for navigation
+                await page.waitForNavigation({ waitUntil: 'networkidle2' });
             }
-            await page.evaluate(() => window.scrollBy(0, window.innerHeight));
+            
             feedPageUrl = page.url();
             if (feedPageUrl.includes('rule34video')) {
                 await page.reload({ waitUntil: 'networkidle2' }); // Refresh the page
@@ -237,13 +308,39 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
     return totalAdded;  // Return the total
 };
 
-const processLink = async (page, link, existingLinks, mediaSelectors, username, progressCallback) => {
+// 1. PARALLEL PROCESSING - Modified to work with browser instances
+const processLink = async (browser, link, existingLinkSet, mediaSelectors, username, progressCallback) => {
+    const page = await browser.newPage();
+    
     try {
+        // 4. RESOURCE MANAGEMENT - Configure page for performance
+        await page.setRequestInterception(true);
+        page.on('request', request => {
+            const resourceType = request.resourceType();
+            if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font') {
+                request.abort();
+            } else {
+                request.continue();
+            }
+        });
+        
+        // Check if link already exists for efficiency
+        if (existingLinkSet.has(link)) {
+            return { linksAdded: 0 };
+        }
+        
         const jinaLink = link.includes('kemono.su') ? `https://r.jina.ai/${link}` : link;
-        const response = await page.goto(jinaLink, { waitUntil: 'networkidle2' });
-        if (!response || response.status() === 404) { // Add null check for response
+        
+        // 3. SMART WAITING - Better navigation with proper waitUntil
+        const response = await page.goto(jinaLink, { 
+            waitUntil: 'domcontentloaded', // Faster than networkidle2
+            timeout: 30000 
+        });
+        
+        if (!response || response.status() === 404) {
             console.error(`Resource not found at ${jinaLink} (404)`);
-            return 0;
+            await page.close();
+            return { linksAdded: 0 };
         }
 
         let mediaData;
@@ -251,28 +348,28 @@ const processLink = async (page, link, existingLinks, mediaSelectors, username, 
             const videoId = link.match(/\/video\/(\d+)/)[1];
             mediaData = `https://rule34video.com/embed/${videoId}`;
         } else {
+            // Wait for content to load before extraction
+            await page.waitForFunction(() => {
+                return document.readyState === 'complete';
+            }, { timeout: 10000 });
+            
             mediaData = await extractMediaData(page, link, mediaSelectors);
         }
 
         if (mediaData) {
             const mediaLink = { postLink: link, videoLinks: [mediaData] }; // Add video link with square brackets
             const linksAdded = saveMediaLinks([mediaLink], username);
-            existingLinks.push(mediaLink);
             
-            // Log progress
-            console.log(`Added ${linksAdded} new links, current total: ${existingLinks.length}`);
-            
-            // Call progress callback each time we add links
-            if (progressCallback) {
-                progressCallback(linksAdded);
-            }
-            
-            return linksAdded;
+            await page.close();
+            return { mediaLink, linksAdded };
         }
-        return 0;
+        
+        await page.close();
+        return { linksAdded: 0 };
     } catch (error) {
         console.error(`Failed to load resource at ${link}:`, error);
-        return 0;
+        await page.close();
+        return { linksAdded: 0 };
     }
 };
 
