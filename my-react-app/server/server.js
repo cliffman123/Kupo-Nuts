@@ -244,14 +244,23 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        // Set token in cookie with updated settings for cross-site functionality
-        res.cookie('token', token, {
+        // Log detailed cookie setup info for debugging
+        console.log('Setting authentication cookie with following properties:');
+        console.log('- Environment:', process.env.NODE_ENV);
+        console.log('- Is secure:', process.env.NODE_ENV === 'production');
+        console.log('- Origin:', req.headers.origin);
+        
+        // Modified cookie settings for broader browser compatibility
+        const cookieOptions = {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production', // true in production
-            sameSite: 'none', // Required for cross-site cookies
+            secure: process.env.NODE_ENV === 'production' ? true : false,
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
             path: '/',
             maxAge: 24 * 60 * 60 * 1000 // 24 hours
-        });
+        };
+
+        console.log('Cookie options:', cookieOptions);
+        res.cookie('token', token, cookieOptions);
 
         res.json({ message: 'Login successful' });
     } catch (error) {
@@ -260,9 +269,28 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
     }
 });
 
+// Update logout endpoint to better handle cookie clearing
 app.post('/api/logout', (req, res) => {
-    res.clearCookie('token');
-    req.session.destroy();
+    console.log('Logout requested, clearing token cookie');
+    
+    // Clear cookie with same options that were used when setting it
+    const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production' ? true : false,
+        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+        path: '/'
+    };
+    
+    res.clearCookie('token', cookieOptions);
+    
+    if (req.session) {
+        req.session.destroy(err => {
+            if (err) {
+                console.error('Error destroying session:', err);
+            }
+        });
+    }
+    
     res.json({ message: 'Logout successful' });
 });
 
