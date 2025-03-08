@@ -7,13 +7,9 @@ const isDevelopment = process.env.NODE_ENV === 'development' ||
 
 // Set API URL based on environment
 const config = {
-  // Use localhost:5000 in development, your Render URL in production
-  API_URL: isDevelopment 
-    ? 'http://localhost:5000'
-    : 'https://kupo-nuts.onrender.com', // Replace with your actual Render URL
-  
-  // Add other configuration values as needed
-  VERSION: '1.0.0',
+  API_URL: process.env.NODE_ENV === 'production' 
+    ? 'https://kupo-nuts.onrender.com'
+    : 'http://localhost:5000'
 };
 
 console.log('Running in', isDevelopment ? 'DEVELOPMENT' : 'PRODUCTION', 'mode');
