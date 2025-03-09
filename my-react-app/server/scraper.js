@@ -6,7 +6,7 @@ require('dotenv').config();
 
 // Configure resource blocking for better performance
 const { createBlockResourcesPlugin } = require('./blockResourcesPlugin');
-const blockResourcesPlugin = createBlockResourcesPlugin(['font', 'media']);
+const blockResourcesPlugin = createBlockResourcesPlugin(['font']);
 puppeteer.use(StealthPlugin());
 puppeteer.use(blockResourcesPlugin);
 
@@ -40,21 +40,72 @@ const CONFIG = {
 // Derived paths
 const PIXIV_LINKS_PATH = path.resolve(CONFIG.DATA_DIR, 'pixivLinks.json');
 
-// DOM selectors for navigation
-const NEXT_PAGE_SELECTORS = [
-    'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-feed-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
-    'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-home-page > div > div.right-panel > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
-    'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-view-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
-    '#custom_list_videos_common_videos_pagination > div.item.pager.next > a',
-    '#custom_list_videos_common_videos_pagination > div.item.pager.next > a > svg > use',
-    '#paginator > a:nth-child(10)',
-    'body > div.main_content > div.overview_thumbs > ul > li:nth-child(7) > a',
-    'body > div.main_content > div.overview_thumbs > ul > li:nth-child(4) > a',
-    '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div > section > div.sc-s8zj3z-4.gjeneI > div.sc-ikag3o-1.mFrzi > nav > a:nth-child(9)',
-    '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div > section > div.sc-s8zj3z-4.gjeneI > div.sc-ikag3o-1.mFrzi > nav > a:nth-child(9)',
-    '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div.sc-12rgki1-0.jMEnyM > nav > a:nth-child(9)'
-];
+// Domain-specific selectors
+const WEBSITE_SELECTORS = {
+  'pixiv.net': {
+    nextPage: [
+      'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-feed-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
+      'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-home-page > div > div.right-panel > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
+      'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-view-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target'
+    ],
+    media: [
+      'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-post-page > app-page > app-post-page-content > app-post-image > div > img'
+    ]
+  },
+  'gelbooru.com': {
+    nextPage: ['#paginator > a:nth-child(10)'],
+    media: ['img#image', '#container > main > div.mainBodyPadding > section.image-container.note-container > picture']
+  },
+  'rule34video.com': {
+    nextPage: [
+      '#custom_list_videos_common_videos_pagination > div.item.pager.next > a',
+      '#custom_list_videos_common_videos_pagination > div.item.pager.next > a > svg > use',
+      '#custom_list_videos_most_recent_videos_pagination > div.item.pager.next',
+      '#custom_list_videos_common_videos_pagination > div.item.pager.next'
+    ],
+  },
+  'kemono.su': {
+    nextPage: [
+      '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div > section > div.sc-s8zj3z-4.gjeneI > div.sc-ikag3o-1.mFrzi > nav > a:nth-child(9)',
+      '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div.sc-12rgki1-0.jMEnyM > nav > a:nth-child(9)'
+    ],
+    media: ['img[src*=".webp"]']
+  },
+  'r-34.xyz': {
+    nextPage: [
+      '#custom_list_videos_common_videos_pagination > div.item.pager.next > a'
+    ],
+    media: ['body > div.root.dark-theme > main > div.appbar-content > div:nth-child(2) > div.con']
+  },
+  'danbooru': {
+    nextPage: [
+      '#posts > div > div.paginator.numbered-paginator.mt-8.mb-4.space-x-2.flex.justify-center.items-center > a.paginator-next'
+    ],
+    media: ['#image', '#content > section.image-container.note-container.blacklisted > picture']
+  },
+  // Fallback selectors for any website not explicitly defined
+  'default': {
+    nextPage: [
+      'body > div.main_content > div.overview_thumbs > ul > li:nth-child(7) > a',
+      'body > div.main_content > div.overview_thumbs > ul > li:nth-child(4) > a'
+    ],
+    media: [
+      'video source[type="video/mp4"]',
+      'img#image',
+      'main video#gelcomVideoPlayer source',
+      'picture img',
+      'img[src*=".webp"]',
+      'img',
+      'body > div.main_content.post_section > div.outer_post > div.post_image > div > img'
+    ]
+  }
+};
 
+// For backward compatibility - create flat array of all next page selectors
+const NEXT_PAGE_SELECTORS = Object.values(WEBSITE_SELECTORS)
+  .flatMap(site => site.nextPage);
+
+// DOM selectors for navigation
 const scrapeVideos = async (providedLink = null, page = null, username = null, progressCallback = null) => {
     let browser;
     let totalLinksAdded = 0;  // Add this line to track total links
@@ -69,12 +120,13 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
                 args: [
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
+                    '--no-zygote',
                 ]
             };
             
             // Only use different options in development environment
             if (process.env.NODE_ENV !== 'production') {
-                launchOptions.headless = false;
+                launchOptions.headless = true;
                 launchOptions.args.push(`--disable-extensions-except=${CONFIG.UBLOCK_PATH}`);
                 launchOptions.args.push(`--load-extension=${CONFIG.UBLOCK_PATH}`);
                 // Only use Edge in development environment
@@ -256,7 +308,7 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
             if (providedLink && kemonoRegex.test(providedLink)) {
                 return links.map(link => link.href).filter(href => href.includes('/post') && !href.includes('/posts'));
             } else {
-                return links.map(link => link.href).filter(href => href.includes('/post') || href.includes('/index.php?page=post&s=view&id') || href.includes('/video') || href.includes('/artworks'));
+                return links.map(link => link.href).filter(href => href.includes('/post/') || href.includes('/index.php?page=post&s=view&id') || href.includes('/video') || href.includes('/artworks') || href.includes('/posts/'));
             }
         }, providedLink);
 
@@ -462,6 +514,10 @@ const extractMediaData = async (page, link, mediaSelectors) => {
         return mediaUrls ? mediaUrls.find(url => url.includes('kemono') && !url.includes('/logo.png')) : null;
     } else {
         try {
+            // Get site-specific selectors first, then fall back to provided ones
+            const siteSelectors = getSiteSelectors(link).media;
+            const combinedSelectors = [...siteSelectors, ...mediaSelectors];
+            
             const result = await page.evaluate((selectors) => {
                 // First try the specified selectors
                 for (const selector of selectors) {
@@ -474,40 +530,8 @@ const extractMediaData = async (page, link, mediaSelectors) => {
                     }
                 }
                 
-                // More aggressive search - look for any media content
-                // 1. Check for Open Graph meta tags (often used for sharing media)
-                const ogImage = document.querySelector('meta[property="og:image"]');
-                if (ogImage && ogImage.content) {
-                    return ogImage.content;
-                }
-                
-                // 2. Look for large images on the page
-                const images = Array.from(document.querySelectorAll('img'));
-                const largeImages = images.filter(img => {
-                    // Prefer larger images - they're usually the main content
-                    return (img.naturalWidth > 200 && img.naturalHeight > 200) && 
-                           /\.(png|jpg|jpeg|gif|webp)$/i.test(img.src) && 
-                           !img.src.includes('/logo.png');
-                }).sort((a, b) => {
-                    // Sort by size (largest first)
-                    return (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight);
-                });
-                
-                if (largeImages.length > 0) {
-                    return largeImages[0].src;
-                }
-                
-                // 3. Check for video sources
-                const videos = Array.from(document.querySelectorAll('video source, video'));
-                for (const video of videos) {
-                    const src = video.src || video.currentSrc;
-                    if (src && /\.(mp4|webm|ogg)$/i.test(src)) {
-                        return src;
-                    }
-                }
-                
                 return null;
-            }, mediaSelectors);
+            }, combinedSelectors);
             
             return result;
         } catch (error) {
@@ -518,22 +542,38 @@ const extractMediaData = async (page, link, mediaSelectors) => {
 };
 
 const findNextPageSelector = async (page, pageCount, feedPageUrl) => {
+    // Special case for gelbooru that requires page count
     if (feedPageUrl.includes('gelbooru')) {
-        const exists = await page.$(`#paginator > a:nth-child(${pageCount + 2})`) !== null;
-            if (exists) {
-                return `#paginator > a:nth-child(${pageCount + 2})`;
-            }
-            else {
-                return null;
-            }
-    } else {
-        for (const selector of NEXT_PAGE_SELECTORS) {
+        const selector = `#paginator > a:nth-child(${pageCount + 2})`
+        const exists = await page.$(selector) !== null;
+        if (exists) {
+            return selector;
+        } else {
+            return null;
+        }
+    } 
+    
+    // Get website-specific selectors
+    const siteSelectors = getSiteSelectors(feedPageUrl).nextPage;
+    
+    // Try site-specific selectors first
+    for (const selector of siteSelectors) {
+        const exists = await page.$(selector) !== null;
+        if (exists) {
+            return selector;
+        }
+    }
+    
+    // If not found, try all selectors as fallback
+    for (const selector of NEXT_PAGE_SELECTORS) {
+        if (!siteSelectors.includes(selector)) {
             const exists = await page.$(selector) !== null;
             if (exists) {
                 return selector;
             }
         }
     }
+    
     return null;
 };
 
@@ -665,7 +705,7 @@ const scrapeSavedLinks = async () => {
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
-            '--disable-gpu'
+            '--disable-gpu',
         ]
         // Remove executablePath to use bundled Chromium
     };
@@ -811,6 +851,28 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
         console.log(`Total links count: ${postLinksQueue.length}`);
     }
     return totalAdded;
+};
+
+// Helper function to get appropriate selectors for a given URL
+const getSiteSelectors = (url) => {
+  if (!url) return WEBSITE_SELECTORS.default;
+  
+  // Get domain from URL
+  let domain;
+  try {
+    domain = new URL(url).hostname.toLowerCase();
+  } catch (e) {
+    return WEBSITE_SELECTORS.default;
+  }
+  
+  // Find matching domain in WEBSITE_SELECTORS
+  for (const siteDomain in WEBSITE_SELECTORS) {
+    if (domain.includes(siteDomain)) {
+      return WEBSITE_SELECTORS[siteDomain];
+    }
+  }
+  
+  return WEBSITE_SELECTORS.default;
 };
 
 module.exports = { scrapeVideos, scrapeSavedLinks };
