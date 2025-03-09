@@ -225,147 +225,6 @@ const checkLoginAttempts = (req, res, next) => {
     next();
 };
 
-// Enhance loadExistingUsers to also restore user data files
-const loadExistingUsers = () => {
-    try {
-        const usersDir = getUsersDir();
-        if (!fs.existsSync(usersDir)) {
-            fs.mkdirSync(usersDir, { recursive: true, mode: 0o755 });
-            
-            // Check for backup user data file
-            const backupFile = path.join(getDataDir(), 'users_backup.json');
-            if (fs.existsSync(backupFile)) {
-                console.log('Restoring users from backup file');
-                const backupData = JSON.parse(fs.readFileSync(backupFile, 'utf8'));
-                
-                // Restore users from backup
-                Object.keys(backupData).forEach(username => {
-                    users[username] = backupData[username];
-                    
-                    // Create user directory
-                    const userDir = getUserDir(username);
-                    
-                    // Create password file
-                    const passwordPath = path.join(userDir, 'password.txt');
-                    fs.writeFileSync(passwordPath, users[username].password);
-                    
-                    // Initialize user files
-                    initializeUserFiles(username);
-                });
-            }
-            
-            // Restore user data if backup exists
-            const userDataBackupFile = path.join(getDataDir(), 'user_data_backup.json');
-            if (fs.existsSync(userDataBackupFile)) {
-                console.log('Restoring user data from backup file');
-                try {
-                    const userData = JSON.parse(fs.readFileSync(userDataBackupFile, 'utf8'));
-                    
-                    Object.keys(userData).forEach(username => {
-                        // Restore links.json
-                        if (userData[username].links && Array.isArray(userData[username].links)) {
-                            const linksPath = getUserFilePath(username, 'links');
-                            fs.writeFileSync(linksPath, JSON.stringify(userData[username].links, null, 2), 'utf8');
-                        }
-                        
-                        // Restore scrape-links.json
-                        if (userData[username]['scrape-links'] && Array.isArray(userData[username]['scrape-links'])) {
-                            const scrapeLinksPath = getUserFilePath(username, 'scrape-links');
-                            fs.writeFileSync(scrapeLinksPath, JSON.stringify(userData[username]['scrape-links'], null, 2), 'utf8');
-                        }
-                    });
-                    
-                    console.log('User data restored successfully');
-                } catch (err) {
-                    console.error('Error restoring user data:', err);
-                }
-            }
-            return;
-        }
-        
-        const userFolders = fs.readdirSync(usersDir);
-        console.log(`Found ${userFolders.length} user folders`);
-        
-        userFolders.forEach(username => {
-            try {
-                const passwordPath = path.join(usersDir, username, 'password.txt');
-                
-                if (fs.existsSync(passwordPath)) {
-                    const passwordHash = fs.readFileSync(passwordPath, 'utf8').trim();
-                    users[username] = {
-                        password: passwordHash,
-                        createdAt: new Date()
-                    };
-                } else {
-                    users[username] = {
-                        password: "$2b$10$defaulthashforlegacyusers",
-                        createdAt: new Date()
-                    };
-                    fs.mkdirSync(path.join(usersDir, username), { recursive: true });
-                    fs.writeFileSync(passwordPath, users[username].password);
-                }
-            } catch (err) {
-                console.error(`Error loading user ${username}:`, err);
-            }
-        });
-        
-        console.log(`Loaded ${Object.keys(users).length} users`);
-        
-        // Create backup of users data
-        saveUsersBackup();
-    } catch (error) {
-        console.error('Error loading existing users:', error);
-    }
-};
-
-// Enhance the saveUsersBackup function to also backup user data files
-const saveUsersBackup = () => {
-    try {
-        // Save user accounts
-        const backupFile = path.join(getDataDir(), 'users_backup.json');
-        fs.writeFileSync(backupFile, JSON.stringify(users, null, 2));
-        
-        // Save user data files (links and scrape-links)
-        const usersDir = getUsersDir();
-        if (fs.existsSync(usersDir)) {
-            const userFolders = fs.readdirSync(usersDir);
-            const userData = {};
-            
-            userFolders.forEach(username => {
-                userData[username] = { links: [], 'scrape-links': [] };
-                
-                // Backup links.json
-                const linksPath = getUserFilePath(username, 'links');
-                if (fs.existsSync(linksPath)) {
-                    try {
-                        userData[username].links = JSON.parse(fs.readFileSync(linksPath, 'utf8'));
-                    } catch (err) {
-                        console.error(`Error backing up links for ${username}:`, err);
-                    }
-                }
-                
-                // Backup scrape-links.json
-                const scrapeLinksPath = getUserFilePath(username, 'scrape-links');
-                if (fs.existsSync(scrapeLinksPath)) {
-                    try {
-                        userData[username]['scrape-links'] = JSON.parse(fs.readFileSync(scrapeLinksPath, 'utf8'));
-                    } catch (err) {
-                        console.error(`Error backing up scrape-links for ${username}:`, err);
-                    }
-                }
-            });
-            
-            // Save consolidated user data
-            const userDataBackupFile = path.join(getDataDir(), 'user_data_backup.json');
-            fs.writeFileSync(userDataBackupFile, JSON.stringify(userData, null, 2));
-        }
-        
-        console.log('User data backup created successfully');
-    } catch (error) {
-        console.error('Error creating user data backup:', error);
-    }
-};
-
 // API Routes - Authentication
 app.post('/api/register', validatePassword, async (req, res) => {
     try {
@@ -790,7 +649,7 @@ app.post('/api/similar', authenticateToken, async (req, res) => {
     }
 });
 
-// UptimeRobot Health Check Endpoint
+// Health check and API information endpoints
 app.get('/api/health', (req, res) => {
     console.log('❤️ Health check request received');
     res.status(200).json({
@@ -800,44 +659,23 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Serve static files and setup catch-all route
-app.use(express.static(path.join(__dirname, '../build')));
-
 app.get('/', (req, res) => {
-    res.send({
+    res.json({
         status: 'online',
         message: 'Kupo-Nuts API server is running',
         endpoints: ['/api/login', '/api/register', '/api/media', '/api/profile']
     });
 });
 
+// Static file serving
+app.use(express.static(path.join(__dirname, '../build')));
+
+// Client-side routing support
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../build', 'index.html'));
 });
 
-// Initialize server
-loadExistingUsers();
-
-// Add a shutdown handler to save user data
-process.on('SIGINT', () => {
-    console.log('Server shutting down, saving user data...');
-    saveUsersBackup();
-    process.exit();
-});
-
-process.on('SIGTERM', () => {
-    console.log('Server shutting down, saving user data...');
-    saveUsersBackup();
-    process.exit();
-});
-
-// Add a periodic backup process (every 15 minutes)
-setInterval(() => {
-    console.log('Running scheduled backup of user data...');
-    saveUsersBackup();
-}, 15 * 60 * 1000);
-
+// Start server
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server is running on port ${PORT}`);
-    console.log(`Using data directory: ${getDataDir()}`);
+    console.log(`Server running on port ${PORT} | Data dir: ${getDataDir()}`);
 });

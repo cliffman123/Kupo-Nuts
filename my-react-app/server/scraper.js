@@ -1,27 +1,50 @@
-const puppeteer = require('puppeteer-extra'); // Use puppeteer-extra package
+const puppeteer = require('puppeteer-extra');
 const fs = require('fs');
 const path = require('path');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-const { exec } = require('child_process');
 require('dotenv').config();
 
-// 1. IMPROVED RESOURCE MANAGEMENT - Add BlockResourcesPlugin
+// Configure resource blocking for better performance
 const { createBlockResourcesPlugin } = require('./blockResourcesPlugin');
 const blockResourcesPlugin = createBlockResourcesPlugin(['font', 'media']);
 puppeteer.use(StealthPlugin());
 puppeteer.use(blockResourcesPlugin);
 
-const EDGE_PATH = process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-const LINKS_PATH = process.env.LINKS_PATH || 'C:\\Users\\cliff\\.vscode\\Website Project\\my-react-app\\build\\links.json';
-const LOGIN_URL = process.env.LOGIN_URL || 'https://rule34.xyz/auth/login';
-const FEED_URL = process.env.FEED_URL || 'https://www.pixiv.net/discovery?mode=r18';
-// Remove COOKIES_PATH constant as we won't be using cookies
-const PIXIV_LOGIN_URL = process.env.PIXIV_LOGIN_URL || 'https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2Fen%2F&lang=en&source=pc&view_type=page';
-const USER_DATA_DIR = process.env.USER_DATA_DIR || 'C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data'; // Update this path to your Edge user data directory
+// Configuration - Environment variables with defaults
+const CONFIG = {
+  // Paths
+  EDGE_PATH: process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+  LINKS_PATH: process.env.LINKS_PATH || path.join(__dirname, '../../build/links.json'),
+  DATA_DIR: process.env.DATA_DIR || path.join(__dirname, '../../data'),
+  UBLOCK_PATH: process.env.UBLOCK_PATH || path.resolve('C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data/Default/Extensions/odfafepnkmbhccpbejgmiehpchacaeak/1.62.0_0'),
+  
+  // URLs
+  FEED_URL: process.env.FEED_URL || 'https://www.pixiv.net/discovery?mode=r18',
+  PIXIV_LOGIN_URL: process.env.PIXIV_LOGIN_URL || 'https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2Fen%2F&lang=en&source=pc&view_type=page',
+  
+  // Credentials - Always use environment variables for sensitive data
+  PIXIV_USERNAME: process.env.PIXIV_USERNAME,
+  PIXIV_PASSWORD: process.env.PIXIV_PASSWORD,
+  
+  // Scraping settings
+  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '10'),
+  
+  // Rate limiting
+  RATE_LIMIT: {
+    minTime: parseInt(process.env.RATE_LIMIT_MIN_TIME || '800'),
+    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '3'),
+    retries: parseInt(process.env.RATE_LIMIT_RETRIES || '2')
+  }
+};
+
+// Derived paths
+const PIXIV_LINKS_PATH = path.resolve(CONFIG.DATA_DIR, 'pixivLinks.json');
+
+// DOM selectors for navigation
 const NEXT_PAGE_SELECTORS = [
     'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-feed-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
-    'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-home-page > div > div.right-panel > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target', // Selector for the "Next Page For Post" button
-    'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-view-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target', // Selector for the "Next Page For View" button
+    'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-home-page > div > div.right-panel > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
+    'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-view-page > div > div > app-post-grid > app-loadable-items > div.relative > app-provider-paginator > div:nth-child(4) > div > button:nth-child(3) > span.mat-mdc-button-touch-target',
     '#custom_list_videos_common_videos_pagination > div.item.pager.next > a',
     '#custom_list_videos_common_videos_pagination > div.item.pager.next > a > svg > use',
     '#paginator > a:nth-child(10)',
@@ -31,25 +54,6 @@ const NEXT_PAGE_SELECTORS = [
     '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div > section > div.sc-s8zj3z-4.gjeneI > div.sc-ikag3o-1.mFrzi > nav > a:nth-child(9)',
     '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div.sc-12rgki1-0.jMEnyM > nav > a:nth-child(9)'
 ];
-const PAGE_TARGET = process.env.PAGE_TARGET || 10;
-const uBlockPath = process.env.UBLOCK_PATH || path.resolve('C:/Users/cliff/AppData/Local/Microsoft/Edge/User Data/Default/Extensions/odfafepnkmbhccpbejgmiehpchacaeak/1.62.0_0');
-const PIXIV_LINKS_PATH = path.resolve(process.env.DATA_DIR || path.join(__dirname, '../../data'), 'pixivLinks.json');
-
-const PIXIV_USERNAME = process.env.PIXIV_USERNAME;
-const PIXIV_PASSWORD = process.env.PIXIV_PASSWORD;
-
-// Add rate limiting configuration
-const RATE_LIMIT = {
-  minTime: 800, // increased from 500 to reduce server load
-  maxConcurrent: 3, // reduced from 5 to avoid resource exhaustion
-  retries: 2     // add retry capability
-};
-
-// Replace loadCookies function with an empty implementation
-const loadCookies = async (page) => {
-    // Removed cookie loading functionality to avoid protocol errors
-    //console.log('Cookie loading disabled to prevent protocol errors');
-};
 
 const scrapeVideos = async (providedLink = null, page = null, username = null, progressCallback = null) => {
     let browser;
@@ -71,10 +75,10 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
             // Only use different options in development environment
             if (process.env.NODE_ENV !== 'production') {
                 launchOptions.headless = false;
-                launchOptions.args.push(`--disable-extensions-except=${uBlockPath}`);
-                launchOptions.args.push(`--load-extension=${uBlockPath}`);
+                launchOptions.args.push(`--disable-extensions-except=${CONFIG.UBLOCK_PATH}`);
+                launchOptions.args.push(`--load-extension=${CONFIG.UBLOCK_PATH}`);
                 // Only use Edge in development environment
-                launchOptions.executablePath = EDGE_PATH;
+                launchOptions.executablePath = CONFIG.EDGE_PATH;
             }
             
             //console.log('Launching browser with options:', JSON.stringify(launchOptions, null, 2));
@@ -84,7 +88,6 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
             
             // Remove the duplicate request interception - blockResourcesPlugin already handles this
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
-            await loadCookies(page); // Load cookies before doing anything
         }
 
         await page.setBypassCSP(true);
@@ -132,8 +135,8 @@ const readExistingLinks = (username = null) => {
     }
     
     // Default behavior for backward compatibility
-    if (fs.existsSync(LINKS_PATH)) {
-        const data = fs.readFileSync(LINKS_PATH, 'utf-8');
+    if (fs.existsSync(CONFIG.LINKS_PATH)) {
+        const data = fs.readFileSync(CONFIG.LINKS_PATH, 'utf-8');
         links = JSON.parse(data);
         linkSet = new Set(links.map(link => link.postLink));
     }
@@ -142,7 +145,7 @@ const readExistingLinks = (username = null) => {
 };
 
 const loginToPixiv = async (page, providedLink) => {
-    await page.goto(PIXIV_LOGIN_URL, {
+    await page.goto(CONFIG.PIXIV_LOGIN_URL, {
         timeout: 180000,
         waitUntil: 'networkidle2'
     });
@@ -154,11 +157,11 @@ const loginToPixiv = async (page, providedLink) => {
 
     // Wait for username field to be visible before typing
     await page.waitForSelector('input[type="text"]', { visible: true });
-    await page.type('input[type="text"]', "cliffman123@gmail.com");
+    await page.type('input[type="text"]', CONFIG.PIXIV_USERNAME);
     
     // Wait for password field to be visible
     await page.waitForSelector('input[type="password"]', { visible: true });
-    await page.type('input[type="password"]', "$piralKnights7");
+    await page.type('input[type="password"]', CONFIG.PIXIV_PASSWORD);
     
     // Wait for login button and click it
     const loginButtonSelector = '#app-mount-point > div > div > div.sc-fvq2qx-4.csnYja > div.sc-2o1uwj-0.bOKfsa > form > button.charcoal-button.sc-2o1uwj-10.ldVSLT';
@@ -188,7 +191,7 @@ const navigateToFeed = async (page, providedLink) => {
         await page.goto(providedLink, { waitUntil: 'networkidle2' });
     }
     else {
-        await page.goto(FEED_URL, { waitUntil: 'networkidle2' });
+        await page.goto(CONFIG.FEED_URL, { waitUntil: 'networkidle2' });
     }
     console.log('Successfully navigated to the Pixiv page.');
 };
@@ -216,7 +219,7 @@ const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLi
 const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, providedLink = null, username, progressCallback, existingLinkSet = null) => {
     let totalAdded = 0;  // Add counter
     let pageCount = 0;
-    let feedPageUrl = providedLink || FEED_URL;
+    let feedPageUrl = providedLink || CONFIG.FEED_URL;
     const mediaSelectors = [
         'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-post-page > app-page > app-post-page-content > app-post-image > div > img',
         'video source[type="video/mp4"]',
@@ -235,7 +238,7 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
         existingLinkSet = linkSet;
     }
 
-    while (pageCount < PAGE_TARGET) {
+    while (pageCount < CONFIG.PAGE_TARGET) {
         //await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
         
         // 3. SMART WAITING - Wait for content to load
@@ -269,7 +272,7 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
         }
         
         // 1. PARALLEL PROCESSING - Process links in batches with improved resource management
-        const batchSize = RATE_LIMIT.maxConcurrent;
+        const batchSize = CONFIG.RATE_LIMIT.maxConcurrent;
         while (postLinksQueue.length > 0) {
             // Reduce batch size if we're running low on links to avoid wasting resources
             const currentBatchSize = Math.min(batchSize, postLinksQueue.length);
@@ -284,7 +287,7 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
                     mediaSelectors, 
                     username, 
                     progressCallback, 
-                    RATE_LIMIT.retries
+                    CONFIG.RATE_LIMIT.retries
                 ))
             );
             
@@ -308,8 +311,8 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
             
             // If success rate is low, wait longer before next batch
             const waitTime = successRate < 0.5 ? 
-                RATE_LIMIT.minTime * 2 : 
-                RATE_LIMIT.minTime;
+                CONFIG.RATE_LIMIT.minTime * 2 : 
+                CONFIG.RATE_LIMIT.minTime;
                 
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
@@ -669,9 +672,9 @@ const scrapeSavedLinks = async () => {
     
     // Only use different options in development environment
     if (process.env.NODE_ENV !== 'production') {
-        launchOptions.args.push(`--disable-extensions-except=${uBlockPath}`);
-        launchOptions.args.push(`--load-extension=${uBlockPath}`);
-        launchOptions.executablePath = EDGE_PATH;
+        launchOptions.args.push(`--disable-extensions-except=${CONFIG.UBLOCK_PATH}`);
+        launchOptions.args.push(`--load-extension=${CONFIG.UBLOCK_PATH}`);
+        launchOptions.executablePath = CONFIG.EDGE_PATH;
     }
     
     const browser = await puppeteer.launch(launchOptions);
@@ -727,7 +730,7 @@ const processPixivLink = async (page, link, feedPageUrl, username, progressCallb
 };
 
 const collectPixivLinks = async (page, postLinksQueue, providedLink, username, progressCallback) => {
-    let feedPageUrl = providedLink || FEED_URL;
+    let feedPageUrl = providedLink || CONFIG.FEED_URL;
     let pageCount = 0;
     let existingLinks = [];
 
@@ -746,7 +749,7 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
 
     let totalAdded = 0;
 
-    while (pageCount < PAGE_TARGET) {
+    while (pageCount < CONFIG.PAGE_TARGET) {
         await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
 
         
