@@ -7,7 +7,7 @@ require('dotenv').config();
 
 // 1. IMPROVED RESOURCE MANAGEMENT - Add BlockResourcesPlugin
 const { createBlockResourcesPlugin } = require('./blockResourcesPlugin');
-const blockResourcesPlugin = createBlockResourcesPlugin(['image', 'stylesheet', 'font', 'media']);
+const blockResourcesPlugin = createBlockResourcesPlugin(['font', 'media']);
 puppeteer.use(StealthPlugin());
 puppeteer.use(blockResourcesPlugin);
 
@@ -25,6 +25,7 @@ const NEXT_PAGE_SELECTORS = [
     '#custom_list_videos_common_videos_pagination > div.item.pager.next > a',
     '#custom_list_videos_common_videos_pagination > div.item.pager.next > a > svg > use',
     '#paginator > a:nth-child(10)',
+    'body > div.main_content > div.overview_thumbs > ul > li:nth-child(7) > a',
     'body > div.main_content > div.overview_thumbs > ul > li:nth-child(4) > a',
     '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div > section > div.sc-s8zj3z-4.gjeneI > div.sc-ikag3o-1.mFrzi > nav > a:nth-child(9)',
     '#root > div.charcoal-token > div > div:nth-child(4) > div > div > div > section > div.sc-s8zj3z-4.gjeneI > div.sc-ikag3o-1.mFrzi > nav > a:nth-child(9)',
@@ -39,14 +40,15 @@ const PIXIV_PASSWORD = process.env.PIXIV_PASSWORD;
 
 // Add rate limiting configuration
 const RATE_LIMIT = {
-  minTime: 500, // minimum time between requests in ms
-  maxConcurrent: 5 // maximum number of concurrent requests
+  minTime: 800, // increased from 500 to reduce server load
+  maxConcurrent: 3, // reduced from 5 to avoid resource exhaustion
+  retries: 2     // add retry capability
 };
 
 // Replace loadCookies function with an empty implementation
 const loadCookies = async (page) => {
     // Removed cookie loading functionality to avoid protocol errors
-    console.log('Cookie loading disabled to prevent protocol errors');
+    //console.log('Cookie loading disabled to prevent protocol errors');
 };
 
 const scrapeVideos = async (providedLink = null, page = null, username = null, progressCallback = null) => {
@@ -64,7 +66,6 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
                     '--no-sandbox',
                     '--disable-setuid-sandbox',
                 ]
-                // Remove executablePath to use bundled Chromium
             };
             
             // Only use different options in development environment
@@ -76,22 +77,12 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
                 launchOptions.executablePath = EDGE_PATH;
             }
             
-            console.log('Launching browser with options:', JSON.stringify(launchOptions, null, 2));
+            //console.log('Launching browser with options:', JSON.stringify(launchOptions, null, 2));
             browser = await puppeteer.launch(launchOptions);
             const context = browser.defaultBrowserContext();
             page = await context.newPage();
             
-            // 4. RESOURCE MANAGEMENT - Configure page for performance
-            await page.setRequestInterception(true);
-            page.on('request', request => {
-                const resourceType = request.resourceType();
-                if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font') {
-                    request.abort();
-                } else {
-                    request.continue();
-                }
-            });
-            
+            // Remove the duplicate request interception - blockResourcesPlugin already handles this
             await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36');
             await loadCookies(page); // Load cookies before doing anything
         }
@@ -118,15 +109,36 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
 };
 
 // 2. EFFICIENT DATA STRUCTURES - Use Sets for faster lookups
-const readExistingLinks = () => {
-    if (fs.existsSync(LINKS_PATH)) {
-        const data = fs.readFileSync(LINKS_PATH, 'utf-8');
-        const links = JSON.parse(data);
-        // Create a Set of post URLs for O(1) lookup
-        const linkSet = new Set(links.map(link => link.postLink));
+const readExistingLinks = (username = null) => {
+    let links = [];
+    let linkSet = new Set();
+    
+    // If username is provided, read from user-specific file
+    if (username) {
+        const userDir = path.resolve(__dirname, '../../data/users', username);
+        const filePath = path.join(userDir, 'links.json');
+        
+        if (fs.existsSync(filePath)) {
+            try {
+                const data = fs.readFileSync(filePath, 'utf-8');
+                links = JSON.parse(data);
+                linkSet = new Set(links.map(link => link.postLink));
+                console.log(`Read ${linkSet.size} existing links for user ${username}`);
+            } catch (error) {
+                console.error(`Error reading existing links for user ${username}:`, error);
+            }
+        }
         return { links, linkSet };
     }
-    return { links: [], linkSet: new Set() };
+    
+    // Default behavior for backward compatibility
+    if (fs.existsSync(LINKS_PATH)) {
+        const data = fs.readFileSync(LINKS_PATH, 'utf-8');
+        links = JSON.parse(data);
+        linkSet = new Set(links.map(link => link.postLink));
+    }
+    
+    return { links, linkSet };
 };
 
 const loginToPixiv = async (page, providedLink) => {
@@ -184,6 +196,9 @@ const navigateToFeed = async (page, providedLink) => {
 const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLinks, username, progressCallback) => {
     console.log('Provided link:', providedLink);
     let totalAdded = 0;  // Add counter
+    
+    // Read ALL existing links for this user to avoid duplicates
+    const { linkSet: existingLinkSet } = readExistingLinks(username);
 
     await page.goto(providedLink, { waitUntil: 'networkidle2' });
 
@@ -193,12 +208,12 @@ const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLi
         await page.click(buttonSelector);
     }
 
-    totalAdded = await collectAndScrapeLinks(page, postLinksQueue, existingLinks, providedLink, username, progressCallback);
+    totalAdded = await collectAndScrapeLinks(page, postLinksQueue, existingLinks, providedLink, username, progressCallback, existingLinkSet);
     return totalAdded;  // Return the total
 };
 
 // 1. PARALLEL PROCESSING - Process links in parallel batches
-const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, providedLink = null, username, progressCallback) => {
+const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, providedLink = null, username, progressCallback, existingLinkSet = null) => {
     let totalAdded = 0;  // Add counter
     let pageCount = 0;
     let feedPageUrl = providedLink || FEED_URL;
@@ -210,14 +225,18 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
         'picture img',
         'img[src*=".webp"]',
         'img',
-        'body > div.main_content.post_section > div.main_post.related_post > div.outer_post > div.post_image > div > img'
+        'body > div.main_content.post_section > div.outer_post > div.post_image > div > img'
     ];
 
-    // 2. EFFICIENT DATA STRUCTURES - Use Set for faster duplicate checking
-    const existingLinkSet = new Set(existingLinks.map(link => link.postLink));
+    // If not provided, create a Set for faster duplicate checking from existingLinks
+    if (!existingLinkSet) {
+        // Use the enhanced readExistingLinks function to get ALL existing links
+        const { linkSet } = readExistingLinks(username);
+        existingLinkSet = linkSet;
+    }
 
     while (pageCount < PAGE_TARGET) {
-        await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
+        //await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
         
         // 3. SMART WAITING - Wait for content to load
         await page.waitForSelector('a', { timeout: 50000 });
@@ -226,7 +245,7 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
         await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
         
         // Wait for any dynamic content to load after scrolling
-        await page.waitForTimeout(1000);
+        await new Promise(resolve => setTimeout(resolve, 1000));
 
         const postLinks = await page.evaluate((providedLink) => {
             const links = Array.from(document.querySelectorAll('a'));
@@ -238,8 +257,10 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
             }
         }, providedLink);
 
-        // 2. EFFICIENT DATA STRUCTURES - Use Set for faster filtering
+        // Filter only links that don't exist in our collection
         const newPostLinks = postLinks.filter(link => !existingLinkSet.has(link));
+        console.log(`Found ${postLinks.length} post links, ${newPostLinks.length} are new`);
+        
         postLinksQueue.push(...newPostLinks);
 
         if (newPostLinks.length === 0) {
@@ -247,23 +268,33 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
             break;
         }
         
-        // 1. PARALLEL PROCESSING - Process links in batches
+        // 1. PARALLEL PROCESSING - Process links in batches with improved resource management
         const batchSize = RATE_LIMIT.maxConcurrent;
         while (postLinksQueue.length > 0) {
-            const batch = postLinksQueue.splice(0, batchSize);
+            // Reduce batch size if we're running low on links to avoid wasting resources
+            const currentBatchSize = Math.min(batchSize, postLinksQueue.length);
+            const batch = postLinksQueue.splice(0, currentBatchSize);
             
-            // Process batch in parallel
-            const results = await Promise.all(
-                batch.map(link => processLink(page.browser(), link, existingLinkSet, mediaSelectors, username, progressCallback))
+            // Add retry capability to each link processing
+            const results = await Promise.allSettled(
+                batch.map(link => processLinkWithRetry(
+                    page.browser(), 
+                    link, 
+                    existingLinkSet, 
+                    mediaSelectors, 
+                    username, 
+                    progressCallback, 
+                    RATE_LIMIT.retries
+                ))
             );
             
             // Update existingLinkSet and totalAdded
             results.forEach(result => {
-                if (result.mediaLink) {
-                    existingLinkSet.add(result.mediaLink.postLink);
-                    existingLinks.push(result.mediaLink);
+                if (result.status === 'fulfilled' && result.value.mediaLink) {
+                    existingLinkSet.add(result.value.mediaLink.postLink);
+                    existingLinks.push(result.value.mediaLink);
+                    totalAdded += result.value.linksAdded;
                 }
-                totalAdded += result.linksAdded;
             });
             
             // Call progress callback with batch total
@@ -271,8 +302,16 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
                 progressCallback(totalAdded);
             }
             
-            // 4. RESOURCE MANAGEMENT - Rate limiting between batches
-            await new Promise(resolve => setTimeout(resolve, RATE_LIMIT.minTime));
+            // 4. RESOURCE MANAGEMENT - Dynamic rate limiting based on success rate
+            const successCount = results.filter(r => r.status === 'fulfilled' && r.value.mediaLink).length;
+            const successRate = successCount / batch.length;
+            
+            // If success rate is low, wait longer before next batch
+            const waitTime = successRate < 0.5 ? 
+                RATE_LIMIT.minTime * 2 : 
+                RATE_LIMIT.minTime;
+                
+            await new Promise(resolve => setTimeout(resolve, waitTime));
         }
 
         await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
@@ -281,24 +320,22 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
             await page.waitForSelector(nextPageSelector, { timeout: 2000 });
             if (feedPageUrl.includes('rule34video')) {
                 await page.click(nextPageSelector);
-                // 3. SMART WAITING - Wait for navigation
-                await page.waitForNavigation({ waitUntil: 'networkidle2' });
             }
             else {
                 await page.click(nextPageSelector);
-                // 3. SMART WAITING - Wait for navigation
-                await page.waitForNavigation({ waitUntil: 'networkidle2' });
             }
-            
-            feedPageUrl = page.url();
-            if (feedPageUrl.includes('rule34video')) {
+
+            if (feedPageUrl !== page.url()) {
+                feedPageUrl = page.url();
                 await page.reload({ waitUntil: 'networkidle2' }); // Refresh the page
-                console.log('Reloading page...');
+                pageCount++;
             }
-            pageCount++;
+
+            // if (feedPageUrl.includes('rule34video') || feedPageUrl.includes('kusowanka')) {
+            //     await page.reload({ waitUntil: 'networkidle2' }); // Refresh the page
+            // }
 
         } else {
-            console.log('No next page button found, moving to the next saved link.');
             break;
         }
         console.log(`New links added: ${newPostLinks.length}`);
@@ -308,21 +345,39 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
     return totalAdded;  // Return the total
 };
 
-// 1. PARALLEL PROCESSING - Modified to work with browser instances
+// New function with retry capability
+const processLinkWithRetry = async (browser, link, existingLinkSet, mediaSelectors, username, progressCallback, retriesLeft = 1) => {
+    try {
+        const result = await processLink(browser, link, existingLinkSet, mediaSelectors, username, progressCallback);
+        
+        // If no media was found and we have retries left, try again with different wait strategy
+        if (!result.mediaLink && retriesLeft > 0) {
+            console.log(`Retrying link: ${link} (${retriesLeft} retries left)`);
+            return processLinkWithRetry(browser, link, existingLinkSet, mediaSelectors, username, progressCallback, retriesLeft - 1);
+        }
+        
+        return result;
+    } catch (error) {
+        // If error and retries left, try again
+        if (retriesLeft > 0) {
+            console.log(`Error on ${link}, retrying (${retriesLeft} retries left): ${error.message}`);
+            // Wait a bit before retrying
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return processLinkWithRetry(browser, link, existingLinkSet, mediaSelectors, username, progressCallback, retriesLeft - 1);
+        }
+        
+        console.error(`Failed to process ${link} after all retries:`, error.message);
+        return { linksAdded: 0 };
+    }
+};
+
+// Enhance the processLink function with better waiting strategy
 const processLink = async (browser, link, existingLinkSet, mediaSelectors, username, progressCallback) => {
-    const page = await browser.newPage();
+    let page = null;
     
     try {
-        // 4. RESOURCE MANAGEMENT - Configure page for performance
-        await page.setRequestInterception(true);
-        page.on('request', request => {
-            const resourceType = request.resourceType();
-            if (resourceType === 'image' || resourceType === 'stylesheet' || resourceType === 'font') {
-                request.abort();
-            } else {
-                request.continue();
-            }
-        });
+        page = await browser.newPage();
+        
         
         // Check if link already exists for efficiency
         if (existingLinkSet.has(link)) {
@@ -331,27 +386,41 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
         
         const jinaLink = link.includes('kemono.su') ? `https://r.jina.ai/${link}` : link;
         
-        // 3. SMART WAITING - Better navigation with proper waitUntil
+        // Set a more generous timeout for navigation
+        await page.setDefaultNavigationTimeout(60000);
+        
+        // Better waiting strategy - use networkidle2 for more complete page loading
         const response = await page.goto(jinaLink, { 
-            waitUntil: 'domcontentloaded', // Faster than networkidle2
-            timeout: 50000 
+            waitUntil: ['domcontentloaded', 'networkidle2'], // Try to wait for both events
+            timeout: 60000 
         });
         
         if (!response || response.status() === 404) {
             console.error(`Resource not found at ${jinaLink} (404)`);
-            await page.close();
             return { linksAdded: 0 };
         }
 
         let mediaData;
         if (link.includes('/video')) {
-            const videoId = link.match(/\/video\/(\d+)/)[1];
-            mediaData = `https://rule34video.com/embed/${videoId}`;
+            const videoId = link.match(/\/video\/(\d+)/)?.[1];
+            if (videoId) {
+                mediaData = `https://rule34video.com/embed/${videoId}`;
+            }
         } else {
-            // Wait for content to load before extraction
+            // Enhanced waiting - scroll and wait for possible lazy-loaded content
+            await page.evaluate(() => {
+                window.scrollTo(0, document.body.scrollHeight/2);
+                window.scrollTo(0, document.body.scrollHeight);
+                return true;
+            });
+            
+            // Wait additional time for lazy-loaded images
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Wait for readyState complete with increased timeout
             await page.waitForFunction(() => {
                 return document.readyState === 'complete';
-            }, { timeout: 50000 });
+            }, { timeout: 60000 });
             
             mediaData = await extractMediaData(page, link, mediaSelectors);
         }
@@ -360,37 +429,88 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
             const mediaLink = { postLink: link, videoLinks: [mediaData] }; // Add video link with square brackets
             const linksAdded = saveMediaLinks([mediaLink], username);
             
-            await page.close();
             return { mediaLink, linksAdded };
         }
         
-        await page.close();
         return { linksAdded: 0 };
     } catch (error) {
-        console.error(`Failed to load resource at ${link}:`, error);
-        await page.close();
+        console.error(`Failed to load resource at ${link}:`, error.message);
         return { linksAdded: 0 };
+    } finally {
+        // Safety check before closing the page to prevent protocol errors
+        if (page) {
+            try {
+                // Check if page is still connected to browser
+                if (page.isClosed === undefined || !page.isClosed()) {
+                    await page.close().catch(e => {
+                    });
+                }
+            } catch (closeError) {
+            }
+        }
     }
 };
 
+// Enhance the extractMediaData function with more media types and better selectors
 const extractMediaData = async (page, link, mediaSelectors) => {
     if (link.includes('kemono.su')) {
         const pageContent = await page.evaluate(() => document.body.innerText);
         const mediaUrls = pageContent.match(/https:\/\/n\d\.kemono\.su\/data\/[a-f0-9]{2}\/[a-f0-9]{2}\/[a-f0-9]{32}\.(png|jpg|gif|webm|webp)\?f=\S+/g);
         return mediaUrls ? mediaUrls.find(url => url.includes('kemono') && !url.includes('/logo.png')) : null;
     } else {
-        return await page.evaluate((selectors) => {
-            for (const selector of selectors) {
-                const element = document.querySelector(selector);
-                if (element) {
-                    const src = element.src || element.currentSrc;
-                    if (src && /\.(mp4|png|jpg|jpeg|gif|webm|webp)$/.test(src) && !src.includes('/logo.png')) {
+        try {
+            const result = await page.evaluate((selectors) => {
+                // First try the specified selectors
+                for (const selector of selectors) {
+                    const elements = document.querySelectorAll(selector);
+                    for (const element of elements) {
+                        const src = element.src || element.currentSrc;
+                        if (src && /\.(mp4|png|jpg|jpeg|gif|webm|webp)$/i.test(src) && !src.includes('/logo.png')) {
+                            return src;
+                        }
+                    }
+                }
+                
+                // More aggressive search - look for any media content
+                // 1. Check for Open Graph meta tags (often used for sharing media)
+                const ogImage = document.querySelector('meta[property="og:image"]');
+                if (ogImage && ogImage.content) {
+                    return ogImage.content;
+                }
+                
+                // 2. Look for large images on the page
+                const images = Array.from(document.querySelectorAll('img'));
+                const largeImages = images.filter(img => {
+                    // Prefer larger images - they're usually the main content
+                    return (img.naturalWidth > 200 && img.naturalHeight > 200) && 
+                           /\.(png|jpg|jpeg|gif|webp)$/i.test(img.src) && 
+                           !img.src.includes('/logo.png');
+                }).sort((a, b) => {
+                    // Sort by size (largest first)
+                    return (b.naturalWidth * b.naturalHeight) - (a.naturalWidth * a.naturalHeight);
+                });
+                
+                if (largeImages.length > 0) {
+                    return largeImages[0].src;
+                }
+                
+                // 3. Check for video sources
+                const videos = Array.from(document.querySelectorAll('video source, video'));
+                for (const video of videos) {
+                    const src = video.src || video.currentSrc;
+                    if (src && /\.(mp4|webm|ogg)$/i.test(src)) {
                         return src;
                     }
                 }
-            }
+                
+                return null;
+            }, mediaSelectors);
+            
+            return result;
+        } catch (error) {
+            console.error(`Error extracting media data:`, error);
             return null;
-        }, mediaSelectors);
+        }
     }
 };
 
@@ -403,7 +523,6 @@ const findNextPageSelector = async (page, pageCount, feedPageUrl) => {
             else {
                 return null;
             }
-        return selector;
     } else {
         for (const selector of NEXT_PAGE_SELECTORS) {
             const exists = await page.$(selector) !== null;
@@ -421,31 +540,65 @@ const saveMediaLinks = (mediaLinks, username) => {
         return 0;
     }
     
-    // Use data/users instead of build/users to match server.js
-    const userDir = path.join(__dirname, '../../data/users', username);
-    if (!fs.existsSync(userDir)) {
-        fs.mkdirSync(userDir, { recursive: true });
+    // Make path more explicit and ensure it works in development
+    const userDir = path.resolve(__dirname, '../../data/users', username);
+    
+    // Ensure directory exists with better error handling
+    try {
+        if (!fs.existsSync(userDir)) {
+            fs.mkdirSync(userDir, { recursive: true });
+        }
+    } catch (err) {
+        console.error(`Failed to create directory ${userDir}:`, err);
+        // Try alternative directory
+        const altUserDir = path.resolve(__dirname, '../data/users', username);
+        if (!fs.existsSync(altUserDir)) {
+            fs.mkdirSync(altUserDir, { recursive: true });
+        }
     }
     
     const filePath = path.join(userDir, 'links.json');
+    
     let existingLinks = [];
     
-    if (fs.existsSync(filePath)) {
-        const data = fs.readFileSync(filePath, 'utf-8');
-        existingLinks = JSON.parse(data);
-    }
+    try {
+        if (fs.existsSync(filePath)) {
+            const data = fs.readFileSync(filePath, 'utf-8');
+            existingLinks = JSON.parse(data);
+        }
 
-    // Merge new links with existing ones, avoiding duplicates
-    const newLinks = mediaLinks.filter(newLink => 
-        !existingLinks.some(existingLink => 
-            existingLink.postLink === newLink.postLink
-        )
-    );
-    
-    const updatedLinks = [...existingLinks, ...newLinks];
-    fs.writeFileSync(filePath, JSON.stringify(updatedLinks, null, 2));
-    console.log(`Saved ${newLinks.length} new media links to ${filePath}`);
-    return newLinks.length; // Return number of new links added
+        // Merge new links with existing ones, avoiding duplicates
+        const newLinks = mediaLinks.filter(newLink => 
+            !existingLinks.some(existingLink => 
+                existingLink.postLink === newLink.postLink
+            )
+        );
+        
+        if (newLinks.length > 0) {
+            const updatedLinks = [...existingLinks, ...newLinks];
+            fs.writeFileSync(filePath, JSON.stringify(updatedLinks, null, 2));
+            console.log(`Saved ${newLinks.length} new media links to ${filePath}`);
+            return newLinks.length; // Return number of new links added
+        } else {
+            return 0;
+        }
+    } catch (error) {
+        console.error(`Error saving media links to ${filePath}:`, error);
+        // Try to save to an alternative location
+        try {
+            const altFilePath = path.resolve(__dirname, '../data/users', username, 'links.json');
+            const altDir = path.dirname(altFilePath);
+            if (!fs.existsSync(altDir)) {
+                fs.mkdirSync(altDir, { recursive: true });
+            }
+            fs.writeFileSync(altFilePath, JSON.stringify(mediaLinks, null, 2));
+            console.log(`Saved to alternative location: ${altFilePath}`);
+            return mediaLinks.length;
+        } catch (altError) {
+            console.error(`Failed to save to alternative location:`, altError);
+            return 0;
+        }
+    }
 };
 
 const savePixivLinks = (pixivLinks, username, providedLink) => {
@@ -587,12 +740,9 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
         existingLinks = JSON.parse(data);
     }
 
-    // Load existing links from links.json to avoid duplicates
-    let allExistingLinks = [];
-    if (fs.existsSync(LINKS_PATH)) {
-        const data = fs.readFileSync(LINKS_PATH, 'utf-8');
-        allExistingLinks = JSON.parse(data);
-    }
+    // Load existing links from links.json to avoid duplicates - Use our enhanced function
+    const { linkSet: existingLinkSet } = readExistingLinks(username);
+    console.log(`Loaded ${existingLinkSet.size} existing links for duplicate checking`);
 
     let totalAdded = 0;
 
@@ -612,12 +762,15 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
             return links.map(link => link.href).filter(href => href.includes('/artworks'));
         });
 
-        const newPostLinks = postLinks.filter(link => !existingLinks.some(existingLink => existingLink.postLink === link));
-        const uniqueNewPostLinks = newPostLinks.filter((link, index, self) =>
-            index === self.findIndex((t) => (
-                t === link
-            ))
+        // Use our Set for O(1) lookups instead of O(n) array searches
+        const pixivExistingSet = new Set(existingLinks.map(link => link.postLink));
+        const newPostLinks = postLinks.filter(link => 
+            !pixivExistingSet.has(link) && !existingLinkSet.has(link)
         );
+        
+        const uniqueNewPostLinks = [...new Set(newPostLinks)]; // Ensure uniqueness efficiently
+        console.log(`Found ${postLinks.length} Pixiv links, ${uniqueNewPostLinks.length} are new`);
+        
         postLinksQueue.push(...uniqueNewPostLinks);
 
         if (uniqueNewPostLinks.length === 0) {
@@ -627,7 +780,7 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
         while (postLinksQueue.length > 0) {
             const link = postLinksQueue.shift();
             // Check if the link already exists in links.json
-            if (!allExistingLinks.some(existingLink => existingLink.postLink === link)) {
+            if (!existingLinks.some(existingLink => existingLink.postLink === link)) {
                 const newLinks = await processPixivLink(page, link, feedPageUrl, username, progressCallback);
                 totalAdded += newLinks;
                 // Call progress callback after each link is processed

@@ -1016,7 +1016,7 @@ const VideoList = () => {
                     columnClassName="masonry-grid_column"
                 >
                     {selectedMedia.map((media, index) => {
-                        if (!media || !media[1]) return null;
+                        if (!media || !media[1] || media[1].length === 0 || !media[1][0]) return null;
                         const [postLink, videoLinks] = media;
                         const firstVideoLink = videoLinks[0];
                         const isVideo = firstVideoLink && (firstVideoLink.endsWith('.mp4') || firstVideoLink.endsWith('.mov') || firstVideoLink.endsWith('.webm'));

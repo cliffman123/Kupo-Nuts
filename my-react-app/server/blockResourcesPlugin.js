@@ -1,24 +1,37 @@
-/**
- * Custom Puppeteer plugin to block specified resource types
- */
-const createBlockResourcesPlugin = (resourceTypes = ['image', 'stylesheet', 'font']) => {
-  return {
-    name: 'block-resources',
-    
-    async onPageCreated(page) {
-      await page.setRequestInterception(true);
-      
-      page.on('request', (request) => {
-        if (resourceTypes.includes(request.resourceType())) {
-          request.abort();
-        } else {
-          request.continue();
-        }
-      });
-      
-      console.log(`BlockResourcesPlugin: Blocking resource types: ${resourceTypes.join(', ')}`);
-    }
-  };
-};
+const { PuppeteerExtraPlugin } = require('puppeteer-extra-plugin')
 
-module.exports = { createBlockResourcesPlugin };
+/**
+ * Plugin to block specific resource types in Puppeteer
+ */
+class BlockResourcesPlugin extends PuppeteerExtraPlugin {
+  constructor(opts = {}) {
+    super(opts)
+    this.resourceTypes = opts.resourceTypes || ['font', 'media']
+  }
+
+  get name() {
+    return 'block-resources'
+  }
+
+  async onPageCreated(page) {
+    await page.setRequestInterception(true)
+    page.on('request', request => {
+      const resourceType = request.resourceType()
+      if (this.resourceTypes.includes(resourceType)) {
+        request.abort()
+      } else {
+        request.continue()
+      }
+    })
+  }
+}
+
+/**
+ * Create a new instance of the plugin
+ * @param {Array} resourceTypes - Array of resource types to block
+ */
+const createBlockResourcesPlugin = (resourceTypes = ['font', 'media']) => {
+  return new BlockResourcesPlugin({ resourceTypes })
+}
+
+module.exports = { createBlockResourcesPlugin }

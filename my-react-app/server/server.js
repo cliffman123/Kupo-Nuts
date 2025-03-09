@@ -490,10 +490,19 @@ app.post('/api/remove', authenticateToken, (req, res) => {
     try {
         let data = fs.readFileSync(filePath, 'utf8');
         let links = JSON.parse(data);
-        links = links.filter(link => link.postLink !== postLink);
-        fs.writeFileSync(filePath, JSON.stringify(links, null, 2), 'utf8');
         
-        res.status(200).json({ message: 'Media removed successfully' });
+        // Find the link with matching postLink and remove its videoLinks
+        const updatedLinks = links.map(link => {
+            if (link.postLink === postLink) {
+                // Keep the post link but remove the video links
+                return { ...link, videoLinks: [] };
+            }
+            return link;
+        });
+        
+        fs.writeFileSync(filePath, JSON.stringify(updatedLinks, null, 2), 'utf8');
+        
+        res.status(200).json({ message: 'Media removed successfully, post link retained' });
     } catch (error) {
         console.error('Error removing media:', error);
         res.status(500).json({ error: 'Internal Server Error' });
@@ -783,6 +792,7 @@ app.post('/api/similar', authenticateToken, async (req, res) => {
 
 // UptimeRobot Health Check Endpoint
 app.get('/api/health', (req, res) => {
+    console.log('❤️ Health check request received');
     res.status(200).json({
         status: 'ok',
         timestamp: new Date().toISOString(),
