@@ -31,8 +31,26 @@ const passwordUtils = {
    * @returns {Promise<boolean>} - True if password matches, false otherwise
    */
   compare: async (password, hashedPassword) => {
+    // Validate input
+    if (!hashedPassword || typeof hashedPassword !== 'string' || !hashedPassword.includes(':')) {
+      console.error('Invalid hashed password format:', hashedPassword);
+      return Promise.resolve(false);
+    }
+    
     // Split stored hash into parts
-    const [iterations, salt, storedHash] = hashedPassword.split(':');
+    const parts = hashedPassword.split(':');
+    if (parts.length !== 3) {
+      console.error('Hashed password does not have the expected format (iterations:salt:hash)');
+      return Promise.resolve(false);
+    }
+    
+    const [iterations, salt, storedHash] = parts;
+    
+    // Verify all parts exist
+    if (!iterations || !salt || !storedHash) {
+      console.error('Missing parts in hashed password:', { iterations, salt, storedHash });
+      return Promise.resolve(false);
+    }
     
     return new Promise((resolve, reject) => {
       // Use same parameters to hash the input password

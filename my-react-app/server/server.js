@@ -248,9 +248,6 @@ app.post('/api/register', validatePassword, async (req, res) => {
         
         const passwordPath = path.join(getUserDir(username), 'password.txt');
         fs.writeFileSync(passwordPath, hashedPassword);
-        
-        // Create backup after adding a new user
-        saveUsersBackup();
 
         res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
