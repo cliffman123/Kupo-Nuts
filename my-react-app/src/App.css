@@ -1,0 +1,26 @@
+body {
+    background-color: #121212;
+    color: #ffffff;
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.app-header {
+    display: flex;
+    align-items: center;
+    color: #ffffff; /* Change text color to white */
+    padding: 3px; /* Shrink padding */
+    background-color: #00bfa5; /* Bright teal background */
+    font-size: 10px; /* Shrink font size */
+    margin: 0; /* Remove margin */
+    border-bottom: 1px solid #00bfa5; /* Bright teal bottom border */
+}
+
+.app-logo {
+    height: auto; /* Maintain aspect ratio */
+    width: auto; /* Maintain aspect ratio */
+    max-height: 50px; /* Set a maximum height */
+    max-width: 50px; /* Set a maximum width */
+    margin-right: 10px; /* Space between the image and the text */
+}

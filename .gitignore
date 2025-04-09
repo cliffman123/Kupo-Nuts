@@ -1,1 +1,3 @@
-.vercel
+.env
+/node_modules
+/my-react-app/node_modules

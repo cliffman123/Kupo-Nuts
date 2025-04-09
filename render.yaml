@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: kupo-nuts
+    env: node
+    buildCommand: |
+      # Update package lists
+      apt-get update
+      
+      # Install necessary dependencies
+      apt-get install -y wget gnupg ca-certificates fonts-liberation libappindicator3-1 libasound2 libatk-bridge2.0-0 libatk1.0-0 libcairo2 libcups2 libdbus-1-3 libdrm2 libexpat1 libgbm1 libgdk-pixbuf2.0-0 libgtk-3-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 lsb-release xdg-utils
+      
+      # Add Google Chrome repository
+      wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add -
+      echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list
+      
+      # Install Chrome
+      apt-get update
+      apt-get install -y google-chrome-stable
+      
+      # Verify Chrome installation
+      google-chrome-stable --version
+      
+      # Set permissions
+      chmod -R o+rx /usr/bin/google-chrome-stable
+      
+      # Find Chrome's actual location and log it
+      which google-chrome-stable
+      ls -la /usr/bin/google-chrome*
+      
+      # Continue with normal build
+      npm run install-all
+      
+      # Install puppeteer browsers explicitly
+      npx puppeteer browsers install chrome
+    startCommand: node my-react-app/server/server.js
+    rootDir: .
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "false"
+      - key: PUPPETEER_DOWNLOAD_PATH
+        value: "/opt/render/.cache/puppeteer"
+      - key: PUPPETEER_EXECUTABLE_PATH
+        value: "/usr/bin/google-chrome-stable"
+      - key: PORT
+        value: "10000" 
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+
+  - type: static
+    name: kupo-nuts-frontend
+    buildCommand: cd my-react-app && npm install && npm run build
+    publishDir: my-react-app/build
+    envVars:
+      - key: NODE_ENV
+        value: production
+
