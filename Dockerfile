@@ -1,5 +1,8 @@
 FROM ghcr.io/puppeteer/puppeteer:19.7.2
 
+# Install build essentials for native modules
+RUN apt-get update && apt-get install -y python3 make g++ build-essential
+
 # Remove the skip download flag to allow Puppeteer to use its bundled Chromium
 ENV NODE_ENV=production
 
