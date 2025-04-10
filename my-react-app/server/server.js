@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const passwordUtils = require('./passwordUtils');
 const jwt = require('jsonwebtoken');
-const session = require('express-session');
+// Removing the session import as we're not using it
 const cookieParser = require('cookie-parser');
 const { scrapeVideos } = require('./scraper');
 const axios = require('axios');
@@ -169,22 +169,6 @@ const corsOptions = {
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
-
-// Cookie and session configuration
-const getCookieOptions = () => ({
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-    path: '/',
-    maxAge: 24 * 60 * 60 * 1000 // 24 hours
-});
-
-app.use(session({
-    secret: process.env.SESSION_SECRET || 'your-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    cookie: getCookieOptions()
-}));
 
 app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
