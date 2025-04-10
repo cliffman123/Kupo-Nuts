@@ -3,6 +3,11 @@ FROM ghcr.io/puppeteer/puppeteer:19.7.2
 # Switch to root to install packages
 USER root
 
+# Fix the GPG key issue for Google Chrome repository
+RUN apt-get update -y && apt-get install -y wget gnupg && \
+    wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 32EE5355A6BC6E42
+
 # Install build essentials for native modules
 RUN apt-get update && apt-get install -y python3 make g++ build-essential
 
