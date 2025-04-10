@@ -20,8 +20,10 @@
     "path": "^0.12.7",
     "puppeteer": "^19.7.2",
     "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-adblocker": "^2.13.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "puppeteer-extra-plugin-adblocker": "^2.13.6"
+    "sequelize": "^6.37.7",
+    "sqlite3": "^5.1.7"
   },
   "engines": {
     "node": ">=14.0.0"
