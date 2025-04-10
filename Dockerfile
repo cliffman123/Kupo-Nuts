@@ -1,5 +1,8 @@
 FROM ghcr.io/puppeteer/puppeteer:19.7.2
 
+# Switch to root to install packages
+USER root
+
 # Install build essentials for native modules
 RUN apt-get update && apt-get install -y python3 make g++ build-essential
 
@@ -25,7 +28,7 @@ RUN echo "Checking for browser executables:" && \
     ls -la /usr/bin/google-chrome* || echo "No google-chrome in /usr/bin" && \
     ls -la $(npm list -g puppeteer --depth=0 --parseable 2>/dev/null || echo ".") | grep -i chrom || echo "No bundled Chromium found"
 
-# Switch to pptruser (the default user in puppeteer image)
+# Switch back to pptruser (the default user in puppeteer image)
 USER pptruser
 
 # Run our diagnostic script before starting the server
