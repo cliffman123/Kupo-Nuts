@@ -4,9 +4,46 @@ import './VideoList.css';
 import JSZip from 'jszip';
 import defaultLinks from './default-links.json';
 import config from '../config'; // Import the config file
+import io from 'socket.io-client';
 
 const API_URL = config.API_URL;
-//Cool
+const LOCAL_STORAGE_KEY = 'kupoNuts_mediaLinks'; // Add this constant for localStorage key
+
+// Add helper functions for localStorage
+const saveToLocalStorage = (mediaLinks) => {
+    try {
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(mediaLinks));
+    } catch (error) {
+        console.error('Error saving to localStorage:', error);
+    }
+};
+
+const getFromLocalStorage = () => {
+    try {
+        const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+        return data ? JSON.parse(data) : [];
+    } catch (error) {
+        console.error('Error reading from localStorage:', error);
+        return [];
+    }
+};
+
+const addToLocalStorage = (mediaItem) => {
+    try {
+        const currentLinks = getFromLocalStorage();
+        // Check if item already exists to prevent duplicates
+        const exists = currentLinks.some(item => item.postLink === mediaItem.postLink);
+        if (!exists) {
+            currentLinks.push(mediaItem);
+            saveToLocalStorage(currentLinks);
+        }
+        return currentLinks;
+    } catch (error) {
+        console.error('Error adding to localStorage:', error);
+        return [];
+    }
+};
+
 const VideoList = () => {
     const [mediaUrls, setMediaUrls] = useState([]);
     const [currentPage, setCurrentPage] = useState(1);
@@ -34,9 +71,25 @@ const VideoList = () => {
     const [isClickable, setIsClickable] = useState(true);
     const [loadedMedia, setLoadedMedia] = useState({});
     const [randomSeed, setRandomSeed] = useState(Date.now());
+    const [tagFilter, setTagFilter] = useState(null);
+    const [contentFilter, setContentFilter] = useState('sfw'); // Default to 'sfw'
+    const [globalVolume, setGlobalVolume] = useState(0.1); // Add global volume state with default 10%
+    const [socket, setSocket] = useState(null); // Add socket state here
+    const [searchQuery, setSearchQuery] = useState(''); // New unified search query
+    const guestId = useRef(localStorage.getItem('kupoguestid') || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+    const [showDefaultLinks, setShowDefaultLinks] = useState(false); // Add state for showing default links
+    const prevScrollY = useRef(0); // Add ref to track previous scroll position
     const mediaRefs = useRef([]);
     const mediaSet = useRef(new Set());
     const observer = useRef();
+    const scrapeNotificationId = useRef(null);
+    const similarNotificationId = useRef(null); // Keep separate IDs for different operations
+    const tagSearchNotificationId = useRef(null);
+    const [showConfirmClear, setShowConfirmClear] = useState(false);
+    const [tagBlacklist, setTagBlacklist] = useState('');
+    const [scrollSpeed, setScrollSpeed] = useState(3); // Default scroll speed
+    const [tagSearchQuery, setTagSearchQuery] = useState('');
+    let defaultMediaLinks = [];
 
     const initialMediaPerPage = 8;
     const mediaPerPage = 16;
@@ -55,11 +108,57 @@ const VideoList = () => {
 
     const fetchConfig = {
         credentials: 'include',
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-        }
     };
+
+    // Add a new helper function to filter media by tag
+    const filterMediaByTag = useCallback((mediaLinks, searchTerm) => {
+        if (!searchTerm) return mediaLinks;
+        
+        const lowercaseSearchTerm = searchTerm.toLowerCase();
+        return mediaLinks.filter(item => {
+            const tags = item[2];
+            
+            // Handle array format tags (legacy format)
+            if (Array.isArray(tags)) {
+                return tags.some(tag => tag.toLowerCase().includes(lowercaseSearchTerm));
+            }
+            
+            // Handle object format tags (current format)
+            return Object.values(tags).some(categoryTags => 
+                Array.isArray(categoryTags) && categoryTags.some(tag => 
+                    tag.toLowerCase().includes(lowercaseSearchTerm)
+                )
+            );
+        });
+    }, []);
+
+    const applyTagBlacklist = useCallback((media) => {
+        if (!tagBlacklist) return media;
+
+        const blacklist = tagBlacklist.split(',').map(tag => tag.trim().toLowerCase());
+
+        return media.filter(item => {
+            const tags = item[2];
+
+            if (!tags) return true;
+
+            const allTags = [];
+
+            if (Array.isArray(tags)) {
+                tags.forEach(tag => allTags.push(tag.toLowerCase()));
+            } else {
+                Object.values(tags).forEach(categoryTags => {
+                    if (Array.isArray(categoryTags)) {
+                        categoryTags.forEach(tag => allTags.push(tag.toLowerCase()));
+                    }
+                });
+            }
+
+            return !blacklist.some(blacklistedTag =>
+                allTags.some(tag => tag.includes(blacklistedTag))
+            );
+        });
+    }, [tagBlacklist]);
 
     const fetchMedia = useCallback(async (page, limit) => {
         setLoading(true);
@@ -73,71 +172,196 @@ const VideoList = () => {
                 
                 if (!response.ok) {
                     if (response.status === 401) {
-                        setIsLoggedIn(false);
-                        setShowLogin(true);
-                        throw new Error('Please login to view media');
+                        //setIsLoggedIn(false);
+                        //throw new Error('Jlullaby');
                     }
-                    throw new Error('Network response was not ok');
+                    //throw new Error('Network response was not ok');
                 }
                 
                 const data = await response.json();
-                mediaLinks = data.map(item => [item.postLink || '', item.videoLinks]);
-            } else {
-                // Only load default links if not logged in and they exist
-                if (!defaultLinks || defaultLinks.length === 0) {
-                    mediaLinks = [];
-                    return; // Exit early if no default links
+                if (data && data.length > 0) {
+                    mediaLinks = data.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
                 }
-                mediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks]);
+                
+                // Load default links if option is enabled
+                if (showDefaultLinks && defaultLinks?.length > 0) {
+                    defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
+                }
+            } else {
+                // Non-logged in users - prioritize links from localStorage
+                const localStorageLinks = getFromLocalStorage();
+                
+                if (localStorageLinks && localStorageLinks.length > 0) {
+                    // Format localStorage data to match expected array format
+                    mediaLinks = localStorageLinks.map(item => [
+                        item.postLink || '',
+                        item.videoLinks || [],
+                        item.tags || {}
+                    ]);
+                }
+                
+                // Add default links when localStorage is empty or showDefaultLinks is enabled
+                if ((mediaLinks.length === 0 || showDefaultLinks) && defaultLinks?.length > 0) {
+                    defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
+                }
+            }
+            
+            // Combine user links with default links if needed
+            if (defaultMediaLinks.length > 0) {
+                if (isLoggedIn && showDefaultLinks) {
+                    mediaLinks = [...mediaLinks, ...defaultMediaLinks];
+                } else if (!isLoggedIn) {
+                    // For non-logged in users, ensure we add default links if empty or requested
+                    mediaLinks = mediaLinks.length > 0 ? 
+                        (showDefaultLinks ? [...mediaLinks, ...defaultMediaLinks] : mediaLinks) : 
+                        defaultMediaLinks;
+                }
             }
 
+            // Step 2: Apply tag filtering if needed
+            if (tagFilter) {
+                mediaLinks = filterMediaByTag(mediaLinks, tagFilter);
+            }
+
+            // Apply tag blacklist
+            mediaLinks = applyTagBlacklist(mediaLinks);
+
+            // Step 3: Apply sorting based on filter
             const totalAvailableItems = mediaLinks.length;
             const startIndex = (page - 1) * limit;
-            
-            // Check if we've reached the end, but don't refresh
+
+            let sortedMediaLinks = [];
+
+            switch (filter.toLowerCase()) {
+                case 'newest': 
+                    // For non-logged in users, keep local storage items first (in reverse order)
+                    // followed by default items (also in reverse order)
+                    sortedMediaLinks = [...mediaLinks].reverse();
+                    break;
+                case 'random':
+                    sortedMediaLinks = shuffleArray([...mediaLinks]);
+                    break;
+                case 'oldest':
+                    sortedMediaLinks = [...mediaLinks];
+                    break;
+                default:
+                    sortedMediaLinks = page % 2 === 0 
+                        ? [...mediaLinks].reverse() 
+                        : shuffleArray([...mediaLinks]);
+                    break;
+            }
+
+            // Step 4: Paginate and update state
+            const endIndex = Math.min(startIndex + limit, totalAvailableItems);
+           
+            const pageMediaUrls = sortedMediaLinks.slice(startIndex, endIndex);
+
             if (startIndex >= totalAvailableItems) {
-                // We've reached the end, simply return without loading more
+                console.log('Reached the end of media items, refreshing...');
                 return;
             }
 
-            let sortedMediaLinks;
-            const shuffledLinks = shuffleArray([...mediaLinks]);
-            const reversedLinks = [...mediaLinks].reverse();
-
-            switch (filter.toLowerCase()) {
-                case 'newest':
-                    sortedMediaLinks = reversedLinks;
-                    break;
-                case 'random':
-                    sortedMediaLinks = shuffleArray([...mediaLinks]); // Create completely random array
-                    break;
-                default:
-                    sortedMediaLinks = page % 2 === 0 ? reversedLinks : shuffledLinks;
-                    break;
-            }
-
-            const endIndex = Math.min(startIndex + limit, totalAvailableItems);
-            const newMediaUrls = sortedMediaLinks.slice(startIndex, endIndex);
-
+            // Step 5: Update state with unique media items
             if (page === 1) {
-                mediaSet.current.clear(); // Clear mediaSet before setting new media URLs
-            }
-
-            const uniqueMediaUrls = newMediaUrls.filter(media => !mediaSet.current.has(media[1][0]));
-            uniqueMediaUrls.forEach(media => mediaSet.current.add(media[1][0]));
-
-            if (page === 1) {
-                setMediaUrls(uniqueMediaUrls);
+                mediaSet.current.clear();
+                setMediaUrls(pageMediaUrls);
             } else {
+                const uniqueMediaUrls = pageMediaUrls.filter(media => !mediaSet.current.has(media[1][0]));
+                uniqueMediaUrls.forEach(media => mediaSet.current.add(media[1][0]));
                 setMediaUrls(prevMediaUrls => [...prevMediaUrls, ...uniqueMediaUrls]);
             }
+            
         } catch (error) {
-            console.error('Failed to load media:', error);
-            showNotification(error.message, 'error');
+            
+            // As a fallback for non-logged in users when fetch fails, use localStorage and defaults
+            if (!isLoggedIn) {
+                const localStorageLinks = getFromLocalStorage();
+                let mediaLinks = [];
+                
+                if (localStorageLinks && localStorageLinks.length > 0) {
+                    mediaLinks = localStorageLinks.map(item => [
+                        item.postLink || '',
+                        item.videoLinks || [],
+                        item.tags || {},
+                        { isUserContent: true } // Mark as user content
+                    ]);
+                }
+                
+                // Always show defaults in error cases if localStorage is empty
+                if (mediaLinks.length === 0 && defaultLinks?.length > 0) {
+                    const defaultMediaLinks = defaultLinks.map(item => [
+                        item.postLink || '', 
+                        item.videoLinks, 
+                        item.tags || {},
+                        { isDefault: true } // Mark as default content
+                    ]);
+                    mediaLinks = defaultMediaLinks;
+                } else if (showDefaultLinks && defaultLinks?.length > 0) {
+                    // Add default links when showDefaultLinks is enabled
+                    const defaultMediaLinks = defaultLinks.map(item => [
+                        item.postLink || '', 
+                        item.videoLinks, 
+                        item.tags || {},
+                        { isDefault: true } // Mark as default content
+                    ]);
+                    mediaLinks = [...mediaLinks, ...defaultMediaLinks];
+                }
+                
+                if (mediaLinks.length > 0) {
+                    // Apply filtering, sorting, and pagination similar to the main function
+                    if (tagFilter) {
+                        mediaLinks = filterMediaByTag(mediaLinks, tagFilter);
+                    }
+
+                    mediaLinks = applyTagBlacklist(mediaLinks);
+                    
+                    let sortedMediaLinks = [];
+
+                    const userItems = mediaLinks.filter(item => item[3]?.isUserContent).reverse();
+                    const defaultItems = mediaLinks.filter(item => item[3]?.isDefault).reverse();
+
+                    switch (filter.toLowerCase()) {
+                        case 'newest':
+                            // For non-logged in users, keep local storage items first (in reverse order)
+                            // followed by default items (also in reverse order)
+                            sortedMediaLinks = [...userItems, ...defaultItems];
+                            break;
+                        case 'random':
+                            sortedMediaLinks = shuffleArray([...mediaLinks]);
+                            break;
+                        case 'oldest':
+                            sortedMediaLinks = [...mediaLinks];
+                            break;
+                        default:
+                            sortedMediaLinks = shuffleArray([...mediaLinks]);
+                            break;
+                    }
+                    
+                    const totalAvailableItems = sortedMediaLinks.length;
+                    const startIndex = (page - 1) * limit;
+                    const endIndex = Math.min(startIndex + limit, totalAvailableItems);
+                    const pageMediaUrls = sortedMediaLinks.slice(startIndex, endIndex);
+                    
+                    if (startIndex >= totalAvailableItems) {
+                        console.log('Reached the end of media items, refreshing...');
+                        return;
+                    }
+                    
+                    if (page === 1) {
+                        mediaSet.current.clear();
+                        setMediaUrls(pageMediaUrls);
+                    } else {
+                        const uniqueMediaUrls = pageMediaUrls.filter(media => !mediaSet.current.has(media[1][0]));
+                        uniqueMediaUrls.forEach(media => mediaSet.current.add(media[1][0]));
+                        setMediaUrls(prevMediaUrls => [...prevMediaUrls, ...uniqueMediaUrls]);
+                    }
+                    
+                }
+            }
         } finally {
             setLoading(false);
         }
-    }, [filter, isLoggedIn, shuffleArray]);
+    }, [filter, isLoggedIn, shuffleArray, tagFilter, showDefaultLinks, filterMediaByTag, applyTagBlacklist]);
 
     const setCookies = () => {
         const cookies = JSON.parse(localStorage.getItem('cookies'));
@@ -163,7 +387,8 @@ const VideoList = () => {
     };
 
     const showNotification = (message, type = 'info') => {
-        const id = Date.now(); // Create unique ID for each notification
+        // Create a more unique ID using both timestamp and a random string
+        const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`; 
         const newNotification = { id, message, type };
         
         setNotifications(prev => [...prev, newNotification]);
@@ -174,116 +399,94 @@ const VideoList = () => {
         }, 3000);
     };
 
-    const showProgressNotification = (id, message, count = 0, isComplete = false) => {
-        console.log('Showing progress notification:', { id, message, count, isComplete });
-        
+    const removeNotification = (id) => {
+        setNotifications(prev => prev.filter(notification => notification.id !== id));
+    };
+
+    const showProgressNotification = (id, message, progress, isComplete) => {
         setNotifications(prev => {
-            const existing = prev.find(n => n.id === id);
-            const updatedNotifications = existing 
-                ? prev.map(n => n.id === id ? { ...n, message, count, isComplete } : n)
-                : [...prev, { id, message, type: 'progress', count, isComplete }];
-            
-            return updatedNotifications;
+            const existingNotificationIndex = prev.findIndex(n => n.id === id);
+
+            if (existingNotificationIndex !== -1) {
+                const updatedNotifications = [...prev];
+                updatedNotifications[existingNotificationIndex] = {
+                    ...updatedNotifications[existingNotificationIndex],
+                    message,
+                    progress,
+                    isComplete
+                };
+                return updatedNotifications;
+            } else {
+                return [...prev, { id, message, type: 'progress', progress, isComplete }];
+            }
         });
     };
 
-    const removeNotification = (id) => {
-        setNotifications(prev => prev.filter(n => n.id !== id));
-    };
+    const handleScrape = async (url = null) => {
+        const urlToScrape = url || scrapeUrl;
 
-    // New helper function to fetch only the latest added media
-    const fetchLatestMedia = async (count = 10) => {
         try {
-            const response = await fetch(`${API_URL}/api/media/latest?count=${count}`, {
-                ...fetchConfig,
-                cache: 'no-cache'
-            });
-            
-            if (!response.ok) {
-                throw new Error('Failed to fetch latest media');
-            }
-            
-            const data = await response.json();
-            return data.map(item => [item.postLink || '', item.videoLinks]);
-        } catch (error) {
-            console.error('Error fetching latest media:', error);
-            return [];
-        }
-    };
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(isLoggedIn ? {
+                    'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
+                } : {
+                    'x-guest-id': guestId.current
+                })
+            };
 
-    // Updated handleScrape function
-    const handleScrape = async () => {
-        const notificationId = Date.now();
-        try {
-            // Show initial "in progress" notification without count
-            showProgressNotification(notificationId, 'Scraping in progress...', 0, false);
-            console.log('Scraping URL:', scrapeUrl);
+            console.log('Scraping URL:', urlToScrape);
+            console.log(isLoggedIn ? 'Logged in' : 'Guest user');
             
+            // Use the same API endpoint for both logged-in and guest users
             const response = await fetch(`${API_URL}/api/scrape`, {
                 method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
-                },
+                headers: headers,
                 ...fetchConfig,
-                body: JSON.stringify({ url: scrapeUrl }),
+                body: JSON.stringify({ url: urlToScrape }),
             });
             
             if (!response.ok) {
                 if (response.status === 401) {
-                    setIsLoggedIn(false);
-                    setShowLogin(true);
                     throw new Error('Please login to scrape media');
                 }
                 throw new Error('Network response was not ok');
             }
-
-            const result = await response.json();
             
-            // Update notification with final count when complete and mark as complete
-            showProgressNotification(notificationId, 'Scraping completed successfully!', result.linksAdded || 0, true);
-            
-            // Handle media updates based on current sort
-            if (filter.toLowerCase() === 'newest') {
-                // Refresh the entire media list for "newest" sort
-                setCurrentPage(1);
-                setMediaUrls([]);
-                await fetchMedia(1, initialMediaPerPage);
-            } else if (result.linksAdded > 0) {
-                // For other sorts, append new media to the end of the current list
-                const latestMedia = await fetchLatestMedia(result.linksAdded);
-                
-                // Add only unique media that isn't already in our list
-                const existingUrls = new Set(mediaUrls.map(media => media[0]));
-                const uniqueNewMedia = latestMedia.filter(media => !existingUrls.has(media[0]));
-                
-                if (uniqueNewMedia.length > 0) {
-                    setMediaUrls(prevMediaUrls => [...prevMediaUrls, ...uniqueNewMedia]);
-                }
+            // For both logged-in users and guests, results will come through WebSocket
+            if (!isLoggedIn) {
+                showNotification('Scraping started - results will be saved to your browser', 'info');
             }
             
-            // Auto-remove notification after a few seconds
-            setTimeout(() => removeNotification(notificationId), 5000);
+            setScrapeUrl('');
+            
         } catch (error) {
             console.error('Failed to scrape:', error);
             showNotification(error.message || 'Failed to scrape. Please try again.', 'error');
-            removeNotification(notificationId);
+            removeNotification(scrapeNotificationId.current);
         }
     };
 
     const handleRemove = async (postLink) => {
         try {
-            const response = await fetch(`${API_URL}/api/remove`, {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                },
-                ...fetchConfig,
-                body: JSON.stringify({ postLink }),
-            });
+            if (isLoggedIn) {
+                // Original server-side remove logic
+                const response = await fetch(`${API_URL}/api/remove`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                    },
+                    ...fetchConfig,
+                    body: JSON.stringify({ postLink }),
+                });
 
-            if (!response.ok) {
-                throw new Error('Failed to remove media');
+                if (!response.ok) {
+                    throw new Error('Failed to remove media');
+                }
+            } else {
+                // For non-logged in users, remove from localStorage
+                const localStorageLinks = getFromLocalStorage();
+                saveToLocalStorage(localStorageLinks.filter(item => item.postLink !== postLink));
             }
 
             // Update the local state to remove the entire post
@@ -300,7 +503,6 @@ const VideoList = () => {
 
     const addScrapeUrlToFile = async (url) => {
         try {
-            console.log('Adding scrape URL to file:', url); // Add logging
             const response = await fetch(`${API_URL}/api/save-scrape-url`, {
                 method: 'POST',
                 headers: { 
@@ -313,9 +515,9 @@ const VideoList = () => {
             });
             if (!response.ok) {
                 if (response.status === 401) {
-                    setIsLoggedIn(false);
-                    setShowLogin(true);
-                    throw new Error('Please login to save scrape URL');
+                    //setIsLoggedIn(false);
+                    //setShowLogin(true);
+                    //throw new Error('Please login to save scrape URL');
                 }
                 throw new Error('Network response was not ok');
             }
@@ -341,15 +543,20 @@ const VideoList = () => {
 
     // Updated handleSimilar function
     const handleSimilar = async (postLink) => {
-        const notificationId = Date.now();
+
+        const headers = {
+            'Content-Type': 'application/json',
+            ...(isLoggedIn ? {
+                'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
+            } : {
+                'x-guest-id': guestId.current
+            })
+        };
+
         try {
-            // Show initial notification without count
-            showProgressNotification(notificationId, 'Searching for similar posts...', 0, false);
-            console.log('Finding similar posts for:', postLink);
-            
             const response = await fetch(`${API_URL}/api/similar`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: headers,
                 ...fetchConfig,
                 body: JSON.stringify({ url: postLink }),
             });
@@ -358,39 +565,75 @@ const VideoList = () => {
                 const errorData = await response.json().catch(() => ({}));
                 throw new Error(errorData.message || 'Failed to find similar posts');
             }
-
-            const result = await response.json();
             
-            if (result.count === 0) {
-                showProgressNotification(notificationId, 'No similar posts found', 0, true);
-            } else {
-                showProgressNotification(notificationId, 'Similar posts found!', result.count, true);
-                
-                // Handle media updates based on current sort
-                if (filter.toLowerCase() === 'newest') {
-                    // Refresh the entire media list for "newest" sort
-                    setCurrentPage(1);
-                    setMediaUrls([]);
-                    await fetchMedia(1, initialMediaPerPage);
-                } else if (result.count > 0) {
-                    // For other sorts, append new media to the end of the current list
-                    const latestMedia = await fetchLatestMedia(result.count);
-                    
-                    // Add only unique media that isn't already in our list
-                    const existingUrls = new Set(mediaUrls.map(media => media[0]));
-                    const uniqueNewMedia = latestMedia.filter(media => !existingUrls.has(media[0]));
-                    
-                    if (uniqueNewMedia.length > 0) {
-                        setMediaUrls(prevMediaUrls => [...prevMediaUrls, ...uniqueNewMedia]);
-                    }
-                }
+            // For both user types, show appropriate notification
+            if (!isLoggedIn) {
+                showNotification('Similar search started - results will be saved to your browser', 'info');
             }
             
-            setTimeout(() => removeNotification(notificationId), 3000);
         } catch (error) {
             console.error('Failed to find similar:', error);
             showNotification(error.message || 'Failed to find similar posts', 'error');
-            removeNotification(notificationId);
+            removeNotification(similarNotificationId.current);
+        }
+    };
+
+    const handleTagSearch = async () => {
+        if (!tagSearchQuery.trim()) {
+            showNotification('Please enter a tag to search', 'info');
+            return;
+        }
+        
+        let notificationId = tagSearchNotificationId.current;
+        if (!notificationId) {
+            notificationId = `tag_search-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+            tagSearchNotificationId.current = notificationId;
+        }
+        
+        try {
+            showProgressNotification(notificationId, 'Searching for tags...', 0, false);
+            
+            // Convert contentFilter string to numeric value
+            const contentFilterValue = contentFilter === 'sfw' ? 0 : 1;
+
+            const headers = {
+                'Content-Type': 'application/json',
+                ...(isLoggedIn ? {
+                    'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
+                } : {
+                    'x-guest-id': guestId.current
+                })
+            };
+
+            console.log(isLoggedIn ? 'Logged in' : 'Guest user');
+            
+            const response = await fetch(`${API_URL}/api/search-tags`, {
+                method: 'POST',
+                headers: headers,
+                ...fetchConfig,
+                body: JSON.stringify({ 
+                    query: tagSearchQuery,
+                    contentType: contentFilterValue
+                }),
+            });
+
+            if (!response.ok) {
+                if (response.status === 401 && isLoggedIn) {
+                    setIsLoggedIn(false);
+                    setShowLogin(true);
+                    throw new Error('Please login to search tags');
+                }
+                throw new Error('Failed to search tags');
+            }
+            
+            // Appropriate notification for guest users
+            if (!isLoggedIn) {
+                showNotification('Tag search started - results will be saved to your browser', 'info');
+            }
+            
+        } catch (error) {
+            console.error('Failed to search tags:', error);
+            showNotification(error.message || 'Failed to search tags', 'error');
         }
     };
 
@@ -411,7 +654,7 @@ const VideoList = () => {
         if (mediaContainer) {
             mediaContainer.classList.add('fullscreen-active');
         }
-        document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon, .similar-icon').forEach(button => {
+        document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon, .similar-icon, .tag, .tags-panel').forEach(button => {
             button.style.zIndex = '1002';
         });
         document.querySelector('.profile-button').style.display = 'none';
@@ -440,7 +683,7 @@ const VideoList = () => {
     };
 
     const handleClickOutside = (event) => {
-        if (fullscreenMedia !== null && !mediaRefs.current[fullscreenMedia]?.contains(event.target) && !event.target.closest('.postlink-icon, .close-icon, .remove-icon, .scrape-button, .auto-scroll-button, .similar-icon')) {
+        if (fullscreenMedia !== null && !mediaRefs.current[fullscreenMedia]?.contains(event.target) && !event.target.closest('.postlink-icon, .close-icon, .remove-icon, .scrape-button, .auto-scroll-button, .similar-icon, .tag, .tags-panel')) {
             handleMediaClose();
         }
     };
@@ -493,7 +736,13 @@ const VideoList = () => {
         setCurrentPage(1);
         setMediaUrls([]);
         fetchMedia(1, initialMediaPerPage);
-    }, [filter, fetchMedia]);
+    }, [filter, tagFilter, fetchMedia]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+        setMediaUrls([]);
+        fetchMedia(1, initialMediaPerPage);
+    }, [tagBlacklist, fetchMedia]);
 
     useEffect(() => {
         fetchMedia(currentPage, mediaPerPage);
@@ -564,20 +813,33 @@ const VideoList = () => {
 
     const handleIconClick = (url) => window.open(url, '_blank');
 
-    const handleScrapeInputKeyPress = (event) => {
-        if (event.key === 'Enter') {
-            if (scrapeUrl.includes('@')) {
-                const listId = scrapeUrl.replace('@', '');
-                fetchTweetsFromList(listId);
-            } else if (scrapeUrl.includes('❤️')) {
-                scrapeSavedLinks();
-            } else {
-                addScrapeUrlToFile(scrapeUrl);
-                handleScrape();
-            }
-            setScrapeUrl('');
+    const handleScroll = useCallback(() => {
+        const currentScrollY = window.scrollY;
+        
+        if (currentScrollY < 50) {
+            prevScrollY.current = currentScrollY;
+            return;
         }
-    };
+        
+       
+        
+        prevScrollY.current = currentScrollY;
+    });
+
+    useEffect(() => {
+        let scrollTimeout;
+        
+        const onScroll = () => {
+            if (scrollTimeout) return;
+            scrollTimeout = setTimeout(() => {
+                handleScroll();
+                scrollTimeout = null;
+            }, 200);
+        };
+        
+        window.addEventListener('scroll', onScroll);
+        return () => window.removeEventListener('scroll', onScroll);
+    }, [handleScroll]);
 
     const breakpointColumnsObj = useMemo(() => ({
         default: 4,
@@ -666,11 +928,17 @@ const VideoList = () => {
             
             // Load saved filter preference after login
             const savedFilter = getFilterFromCookie();
-            setFilter(savedFilter);
+            setFilter(savedFilter || 'default'); 
             
             // Reset page and fetch media after successful login
             setCurrentPage(1);
             setMediaUrls([]);
+            
+            // Update socket authentication status after successful login
+            if (socket) {
+                socket.emit('authenticate', { username });
+            }
+            
             await fetchMedia(1, initialMediaPerPage);
             
         } catch (error) {
@@ -708,6 +976,11 @@ const VideoList = () => {
 
     const handleLogout = async () => {
         try {
+            if (!isLoggedIn) {
+                setShowLogin(true);
+                return;
+            }
+            
             await fetch(`${API_URL}/api/logout`, {
                 method: 'POST',
                 ...fetchConfig,
@@ -715,7 +988,7 @@ const VideoList = () => {
             
             // Update state first
             setIsLoggedIn(false);
-            setFilter('random'); // Set filter to random when logging out
+            setFilter('random'); // Don't trigger extra render cycle with handleFilterChange
             showNotification('Logged out successfully', 'success');
             
             // Close profile menu
@@ -749,37 +1022,145 @@ const VideoList = () => {
         return match ? match[1] : 'default';
     };
 
-    // Add this new effect to check login status on component mount
-    useEffect(() => {
-        const checkLoginStatus = async () => {
-            try {
-                const response = await fetch(`${API_URL}/api/profile`, {
-                    ...fetchConfig
-                });
-                
-                if (response.ok) {
-                    setIsLoggedIn(true);
-                    setAutoScroll(false); // Disable autoScroll when user logs in
-                    // Load saved filter preference
-                    const savedFilter = getFilterFromCookie();
-                    setFilter(savedFilter);
-                    setCurrentPage(1);
-                    setMediaUrls([]);
-                    await fetchMedia(1, initialMediaPerPage);
-                } else {
-                    setIsLoggedIn(false);
-                    setFilter('random'); // Explicitly set filter to random for non-logged in users
-                    setShowLogin(true);
-                }
-            } catch (error) {
-                console.error('Error checking login status:', error);
-                setIsLoggedIn(false);
-                setFilter('random'); // Set filter to random here too in case of error
-                setShowLogin(true);
-            }
-        };
+    const saveScrollSpeedPreference = (speed) => {
+        document.cookie = `preferred_scroll_speed=${speed}; max-age=31536000; path=/`;
+    };
 
-        checkLoginStatus();
+    const getScrollSpeedFromCookie = () => {
+        const match = document.cookie.match(/preferred_scroll_speed=([^;]+)/);
+        return match ? parseInt(match[1], 10) : 3;
+    };
+
+    const saveVolumePreference = (volume) => {
+        document.cookie = `preferred_volume=${volume}; max-age=31536000; path=/`;
+    };
+
+    const getVolumeFromCookie = () => {
+        const match = document.cookie.match(/preferred_volume=([^;]+)/);
+        return match ? parseFloat(match[1]) : 0.1;
+    };
+
+    const saveShowDefaultLinksPreference = (show) => {
+        document.cookie = `show_default_links=${show ? '1' : '0'}; max-age=31536000; path=/`;
+    };
+
+    const getShowDefaultLinksFromCookie = () => {
+        const match = document.cookie.match(/show_default_links=([^;]+)/);
+        return match ? match[1] === '1' : false;
+    };
+
+    // Add new functions for content filter preference
+    const saveContentFilterPreference = (filter) => {
+        document.cookie = `content_filter=${filter}; max-age=31536000; path=/`;
+    };
+
+    const getContentFilterFromCookie = () => {
+        const match = document.cookie.match(/content_filter=([^;]+)/);
+        return match ? match[1] : 'sfw';
+    };
+
+    // Add new functions for auto scroll preference
+    const saveAutoScrollPreference = (autoScroll) => {
+        document.cookie = `auto_scroll=${autoScroll ? '1' : '0'}; max-age=31536000; path=/`;
+    };
+
+    const getAutoScrollFromCookie = () => {
+        const match = document.cookie.match(/auto_scroll=([^;]+)/);
+        return match ? match[1] === '1' : false;
+    };
+
+    const handleFilterChange = (newFilter) => {
+        setFilter(newFilter);
+        saveFilterPreference(newFilter);
+        setRandomSeed(Date.now()); // Ensure random seed is updated when filter changes
+        
+        // Reset pagination and reload content
+        setCurrentPage(1);
+        setMediaUrls([]);
+        // Don't call fetchMedia here to prevent recursion in useEffect dependencies
+    };
+
+    const checkLoginStatus = async () => {
+        try {
+            const response = await fetch(`${API_URL}/api/verify-auth`, {
+                ...fetchConfig,
+                cache: 'no-cache'
+            });
+
+            if (response.ok) {
+                const userData = await response.json();
+                setIsLoggedIn(true);
+                setUsername(userData.username || '');
+                
+                // Get user preferences after confirming login
+                const savedFilter = getFilterFromCookie();
+                setFilter(savedFilter || 'default');
+                
+                // If socket exists, authenticate with the confirmed username
+                if (socket) {
+                    socket.emit('authenticate', { username: userData.username });
+                }
+            } else {
+                setIsLoggedIn(false);
+                setFilter('random'); // Default for non-logged users
+            }
+
+            // Load preferences from cookies regardless of login status
+            setScrollSpeed(getScrollSpeedFromCookie());
+            setShowDefaultLinks(getShowDefaultLinksFromCookie());
+            setContentFilter(getContentFilterFromCookie());
+            setAutoScroll(getAutoScrollFromCookie());
+
+        } catch (error) {
+            console.error('Error checking login status:', error);
+            setIsLoggedIn(false);
+            setFilter('random');
+
+            // Load preferences even on error
+            setScrollSpeed(getScrollSpeedFromCookie());
+            setContentFilter(getContentFilterFromCookie());
+            setAutoScroll(getAutoScrollFromCookie());
+
+            console.log('Error during login check, loading local storage content');
+        }
+    };
+
+    useEffect(() => {
+        setCurrentPage(1);
+        setMediaUrls([]);
+        fetchMedia(1, initialMediaPerPage);
+    }, [isLoggedIn, filter, fetchMedia]);
+
+    useEffect(() => {
+        const savedScrollSpeed = getScrollSpeedFromCookie();
+        setScrollSpeed(savedScrollSpeed);
+        // Initialize the slider fill on component mount
+        setTimeout(() => updateSliderFill(savedScrollSpeed), 100);
+    }, []);
+
+    useEffect(() => {
+        const savedVolume = getVolumeFromCookie();
+        setGlobalVolume(savedVolume);
+        // Initialize the slider fill on component mount
+        setTimeout(() => updateVolumeSliderFill(savedVolume), 100);
+    }, []);
+
+    useEffect(() => {
+        Object.values(mediaRefs.current).forEach(ref => {
+            if (ref && ref.tagName === 'VIDEO') {
+                ref.volume = globalVolume;
+            }
+        });
+    }, [globalVolume]);
+
+    useEffect(() => {
+        const savedShowDefaultLinks = getShowDefaultLinksFromCookie();
+        setShowDefaultLinks(savedShowDefaultLinks);
+    }, []);
+
+    useEffect(() => {
+        const savedContentFilter = getContentFilterFromCookie();
+        setContentFilter(savedContentFilter);
     }, []);
 
     const handleExport = async () => {
@@ -898,20 +1279,29 @@ const VideoList = () => {
                         throw new Error('No valid media links found in file');
                     }
 
-                    const response = await fetch(`${API_URL}/api/import-links`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        ...fetchConfig,
-                        body: JSON.stringify(validContent)
-                    });
+                    if (isLoggedIn) {
+                        // Server-side import for logged-in users
+                        const response = await fetch(`${API_URL}/api/import-links`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            ...fetchConfig,
+                            body: JSON.stringify(validContent)
+                        });
 
-                    if (!response.ok) throw new Error('Failed to import links');
+                        if (!response.ok) throw new Error('Failed to import links');
+                        
+                        showNotification(`Successfully imported ${validContent.length} links`, 'success');
+                    } else {
+                        // Local storage import for non-logged-in users
+                        saveToLocalStorage(validContent);
+                        showNotification(`Successfully imported ${validContent.length} links to local storage`, 'success');
+                    }
                     
-                    showNotification(`Successfully imported ${validContent.length} links`, 'success');
-                    // Refresh media after import
+                    // Refresh the display in both cases
                     setCurrentPage(1);
                     setMediaUrls([]);
                     await fetchMedia(1, initialMediaPerPage);
+                    
                 } catch (error) {
                     console.error('Import error:', error);
                     showNotification(error.message || 'Invalid file format', 'error');
@@ -977,14 +1367,421 @@ const VideoList = () => {
         }));
     };
 
+    // Handle tag click for filtering
+    const handleTagClick = (tag, e) => {
+        e.stopPropagation(); // Prevent triggering the media click
+        
+        if (tagFilter === tag) {
+            // If clicking the same tag again, clear the filter
+            setTagFilter(null);
+        } else {
+            // Set the new tag filter
+            setTagSearchQuery(tag.trim());
+            handleTagSearch();
+            setTagFilter(tag.trim());
+        }
+        
+        // Close fullscreen view when setting a tag filter
+        if (fullscreenMedia !== null) {
+            handleMediaClose();
+        }
+        
+        // Reset to page 1 when changing filters
+        setCurrentPage(1);
+        setMediaUrls([]);
+    };
+
+    // Add a component for the tags panel that supports categorized tags
+    const TagsPanel = ({ tags }) => {
+        // Handle the case where tags is null or empty
+        if (!tags) return <div className="tags-panel"><div className="tags-header">No tags available</div></div>;
+        
+        // Convert old format (array) to new format (object with categories) if needed
+        const categorizedTags = Array.isArray(tags) ? { general: tags } : tags;
+        
+        // Check if we have any tags in any category
+        const hasTags = Object.values(categorizedTags).some(categoryTags => 
+            Array.isArray(categoryTags) && categoryTags.length > 0
+        );
+        
+        if (!hasTags) return <div className="tags-panel"><div className="tags-header">No tags available</div></div>;
+        
+        // Define category display order and labels
+        const categories = [
+            { key: 'author', label: 'Artists' },
+            { key: 'copyright', label: 'Copyright' },
+            { key: 'character', label: 'Characters' },
+            { key: 'general', label: 'General' }
+        ];
+        
+        return (
+            <div className="tags-panel">
+                <div className="tags-header">
+                    Tags
+                </div>
+                
+                {categories.map(category => {
+                    const categoryTags = categorizedTags[category.key];
+                    if (!categoryTags || categoryTags.length === 0) return null;
+                    
+                    return (
+                        <div key={category.key} className="tag-category">
+                            <h3 className="tag-category-header">{category.label}</h3>
+                            <div className="tags-list">
+                                {categoryTags.map((tag, idx) => (
+                                    <span 
+                                        key={`${category.key}-${idx}`}
+                                        className={`tag tag-${category.key} ${tagFilter === tag ? 'active' : ''}`}
+                                        onClick={(e) => handleTagClick(tag, e)}
+                                    >
+                                        {tag}
+                                    </span>
+                                ))}
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        );
+    };
+
+    useEffect(() => {
+        // Store the guest ID in localStorage for persistence
+        localStorage.setItem('kupoguestid', guestId.current);
+        
+        const setupSocket = () => {
+            const newSocket = io(API_URL, {
+                withCredentials: true,
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionAttempts: 10,
+                reconnectionDelay: 1000,
+                reconnectionDelayMax: 5000,
+                timeout: 20000
+            });
+            
+            newSocket.on('connect', () => {
+                console.log('Connected');
+                checkLoginStatus(); // Ensure login status is checked on connection
+                if (isLoggedIn && username) {
+                    newSocket.emit('authenticate', { username });
+                } else {
+                    // Authenticate as a guest
+                    newSocket.emit('authenticate', { isGuest: true, guestId: guestId.current });
+                }
+            });
+            
+            const handleProgressEvent = (data, type) => {
+                
+                let notificationIdRef;
+                switch (type) {
+                    case 'scrape':
+                        notificationIdRef = scrapeNotificationId;
+                        break;
+                    case 'similar':
+                        notificationIdRef = similarNotificationId;
+                        break;
+                    case 'tag_search':
+                        notificationIdRef = tagSearchNotificationId;
+                        break;
+                    default:
+                        notificationIdRef = scrapeNotificationId;
+                }
+                
+                if (!notificationIdRef.current) {
+                    // Create a more unique ID for progress notifications
+                    notificationIdRef.current = `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+                }
+                
+                setNotifications(prevNotifications => {
+                    const currentNotification = prevNotifications.find(n => n.id === notificationIdRef.current);
+                    
+                    const totalLinksAdded = currentNotification?.linksAdded || 0;
+                    const newLinksCount = data.newItems?.length || 0;
+                    
+                    const updatedLinksAdded = data.count !== undefined ? 
+                        data.count :
+                        (totalLinksAdded + newLinksCount);
+                    
+                    const typeLabel = type.split('_')
+                        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+                        .join(' ');
+                    
+                    let linkCountMessage;
+                    if (data.isComplete) {
+                        linkCountMessage = `${typeLabel}: ${updatedLinksAdded} links found`;
+                    } else if (updatedLinksAdded > 0) {
+                        linkCountMessage = `${typeLabel}: ${updatedLinksAdded} links found so far`;
+                    } else {
+                        linkCountMessage = `${typeLabel}: ${data.message || 'Processing...'}`;
+                    }
+                    
+                    const updated = currentNotification 
+                        ? prevNotifications.map(n => n.id === notificationIdRef.current ? {
+                            ...n,
+                            message: linkCountMessage,
+                            count: data.count !== undefined ? data.count : n.count || 0,
+                            isComplete: data.isComplete,
+                            linksAdded: updatedLinksAdded
+                        } : n)
+                        : [...prevNotifications, {
+                            id: notificationIdRef.current,
+                            message: linkCountMessage,
+                            type: 'progress',
+                            count: data.count || 0,
+                            isComplete: data.isComplete,
+                            linksAdded: updatedLinksAdded
+                        }];
+                    
+                    return updated;
+                });
+                
+                if (data.isComplete) {
+                    setTimeout(() => {
+                        const currentId = notificationIdRef.current;
+                        notificationIdRef.current = null;
+                        
+                        
+                        setNotifications(prev => prev.filter(n => n.id !== currentId));
+                    }, 3000);
+                }
+                
+                if (data.newItems && data.newItems.length > 0) {
+                    try {
+                        setMediaUrls(prevMediaUrls => {
+                            let formattedItems = data.newItems.map(item => [
+                                item.postLink || '',
+                                item.videoLinks || [],
+                                item.tags || {}
+                            ]);
+                            
+                            // For non-logged in users, also add to localStorage
+                            if (!isLoggedIn) {
+                                data.newItems.forEach(item => {
+                                    addToLocalStorage(item);
+                                });
+                            }
+
+                            return [...prevMediaUrls, ...formattedItems];
+                        });
+                        
+                    } catch (error) {
+                        console.error(`Error processing new ${type} items:`, error);
+                    }
+                }
+            };
+            
+            newSocket.on('scrape_progress', (data) => handleProgressEvent(data, 'scrape'));
+            newSocket.on('similar_progress', (data) => handleProgressEvent(data, 'similar'));
+            newSocket.on('tag_search_progress', (data) => handleProgressEvent(data, 'tag_search'));
+            
+            newSocket.on('error', (error) => {
+                console.error('WebSocket error:', error);
+                showNotification('WebSocket error. Some features may be affected.', 'error');
+            });
+
+            newSocket.on('reconnect', () => {
+                
+                if (isLoggedIn && username) {
+                    newSocket.emit('authenticate', { username });
+                } else {
+                    newSocket.emit('authenticate', { isGuest: true, guestId: guestId.current });
+                }
+                
+                showNotification('WebSocket reconnected', 'success');
+            });
+            
+            newSocket.on('reconnect_error', (error) => {
+                console.error('WebSocket reconnect error:', error);
+                showNotification('Failed to reconnect WebSocket', 'error');
+            });
+            
+            return newSocket;
+        };
+        
+        // Create socket connection regardless of login state
+        const newSocket = setupSocket();
+        setSocket(newSocket);
+        
+        return () => {
+            if (newSocket) {
+                newSocket.disconnect();
+            }
+        };
+        
+    }, [isLoggedIn, username, API_URL]); // Removed guestId from dependencies
+
+    const updateSliderFill = (value) => {
+        const slider = document.getElementById('scroll-speed');
+        if (slider) {
+            const percentage = ((value - 1) / 9) * 100;
+            slider.style.backgroundSize = `${percentage}% 100%`;
+        }
+    };
+
+    const updateVolumeSliderFill = (value) => {
+        const slider = document.getElementById('volume-control');
+        if (slider) {
+            const percentage = value * 100;
+            slider.style.backgroundSize = `${percentage}% 100%`;
+        }
+    };
+
+    const handleSettingsOpen = () => {
+        setShowSettings(true);
+        // Initialize sliders on settings open
+        setTimeout(() => {
+            updateSliderFill(scrollSpeed);
+            updateVolumeSliderFill(globalVolume);
+        }, 50); // Small timeout to ensure DOM elements are rendered
+    };
+
+    const handleClearCollection = () => {
+        setShowConfirmClear(true);
+    };
+
+    const confirmClearCollection = () => {
+        try {
+            if (isLoggedIn) {
+                // Clear from server
+                fetch(`${API_URL}/api/clear-collection`, {
+                    method: 'POST',
+                    ...fetchConfig,
+                }).then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to clear collection on server');
+                    }
+                    setMediaUrls([]);
+                    showNotification('Collection cleared successfully', 'success');
+                }).catch(error => {
+                    console.error('Error clearing collection:', error);
+                    showNotification('Failed to clear collection', 'error');
+                });
+            } else {
+                // Clear from localStorage
+                localStorage.removeItem(LOCAL_STORAGE_KEY);
+                setMediaUrls([]);
+                showNotification('Local collection cleared', 'success');
+            }
+            setShowConfirmClear(false);
+        } catch (error) {
+            console.error('Error clearing collection:', error);
+            showNotification('Failed to clear collection', 'error');
+        } finally {
+            // Reset media URLs to default if not logged in
+            const defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
+            setMediaUrls(defaultMediaLinks);
+        }
+    };
+
+    const cancelClearCollection = () => {
+        setShowConfirmClear(false);
+    };
+
+    const handleTagBlacklistChange = (event) => {
+        setTagBlacklist(event.target.value);
+    };
+
+    const handleUnifiedSearch = () => {
+        if (searchQuery.trim().toLowerCase().startsWith('http')) {
+            // It's a URL, set scrapeUrl and trigger scraping
+            setScrapeUrl(searchQuery.trim());
+            
+            // Handle special cases
+            if (searchQuery.includes('@')) {
+                const listId = searchQuery.trim().replace('@', '');
+                fetchTweetsFromList(listId);
+            } else if (searchQuery.includes('❤️')) {
+                scrapeSavedLinks();
+            } else {
+                // Regular URL
+                addScrapeUrlToFile(searchQuery.trim());
+                handleScrape(searchQuery.trim()); // Pass URL directly
+            }
+        } else {
+            // It's a tag, trigger tag search
+            setTagSearchQuery(searchQuery.trim());
+            handleTagSearch();
+            setTagFilter(searchQuery.trim());
+        }
+        
+        // Clear the search input
+        setSearchQuery('');
+    };
+
     return (
         <div>
+            <div className="top-search-bar">
+                <div className="left-section">
+                    <div 
+                        className="app-title"
+                        onClick={() => window.location.reload()}
+                        style={{ cursor: 'pointer' }}
+                    >
+                        <i className="fas fa-cat logo-icon"></i>
+                        <span>Kupo Nuts</span>
+                    </div>
+                </div>
+                
+                <button
+                    onClick={() => {
+                        const newFilter = contentFilter === 'sfw' ? 'nsfw' : 'sfw';
+                        setContentFilter(newFilter);
+                        saveContentFilterPreference(newFilter);
+                    }}
+                    className={`content-filter-button ${contentFilter}`}
+                    aria-label="Toggle content filter"
+                    title={`Content filter: ${contentFilter.toUpperCase()}`}
+                >
+                    {contentFilter === 'sfw' ? 'SFW' : 'NSFW'}
+                </button>
+                
+                <div className="search-container">
+                    <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && handleUnifiedSearch()}
+                        placeholder="Enter tag to search or URL to scrape..."
+                        className="search-input"
+                    />
+                    <button
+                        onClick={handleUnifiedSearch}
+                        className="search-button"
+                    >
+                        <i className={`fas ${searchQuery.trim().toLowerCase().startsWith('http') ? 'fa-download' : 'fa-search'}`}></i>
+                    </button>
+                </div>
+
+                <div className="right-section">
+                    <button
+                        onClick={() => setShowProfileMenu(!showProfileMenu)}
+                        className={`profile-button ${isLoggedIn ? 'logged-in' : ''}`}
+                        aria-label="Profile"
+                    >
+                        <i className={`fas ${isLoggedIn ? 'fa-user-check' : 'fa-user'}`}></i>
+                    </button>
+                </div>
+            </div>
+            
+            {tagFilter && fullscreenMedia === null && (
+                <div className="active-filter-indicator">
+                    <span>Filtering by: {tagFilter}</span>
+                    <button 
+                        className="clear-button" 
+                        onClick={() => setTagFilter(null)}
+                        aria-label="Clear filter"
+                    >
+                        <i className="fas fa-times"></i>
+                    </button>
+                </div>
+            )}
             <div className="notifications-container">
-                {notifications.map((notification, index) => (
+                {notifications.map((notification) => (
                     <div 
                         key={notification.id} 
                         className={`notification ${notification.type}`}
-                        style={{ top: `${20 + (index * 70)}px` }}
+                        style={{ top: `${20 + (Array.from(notifications).findIndex(n => n.id === notification.id) * 70)}px` }}
                     >
                         <p className="notification-message">{notification.message}</p>
                         {notification.type === 'progress' && notification.isComplete && (
@@ -1015,12 +1812,12 @@ const VideoList = () => {
                     className="masonry-grid"
                     columnClassName="masonry-grid_column"
                 >
-                    {selectedMedia.map((media, index) => {
-                        if (!media || !media[1] || media[1].length === 0 || !media[1][0]) return null;
-                        const [postLink, videoLinks] = media;
-                        const firstVideoLink = videoLinks[0];
+                    {selectedMedia && selectedMedia.map((media, index) => {
+                        const [postLink, videoLinks = [], tags] = media || [];
+                        if (!media || videoLinks.length === 0 || !videoLinks[0]) return null;
+                        const firstVideoLink = videoLinks && videoLinks[0];
                         const isVideo = firstVideoLink && (firstVideoLink.endsWith('.mp4') || firstVideoLink.endsWith('.mov') || firstVideoLink.endsWith('.webm'));
-                        const isRule34Video = postLink.includes('rule34video');
+                        const isRule34Video = postLink && postLink.includes('rule34video');
                         const embedUrl = firstVideoLink ? firstVideoLink.replace('/view/', '/embed/') : '';
                         const isLoaded = loadedMedia[index];
 
@@ -1031,6 +1828,8 @@ const VideoList = () => {
                                 className={`media-wrapper masonry-item ${fullscreenMedia === index ? 'fullscreen' : ''}`}
                                 onClick={() => handleMediaClick(index)}
                             >
+                                {fullscreenMedia === index && <TagsPanel tags={tags} />}
+                                
                                 <div className={`media-container ${isLoaded ? 'media-loaded' : 'media-loading'}`}>
                                     {isRule34Video ? (
                                         <iframe
@@ -1048,8 +1847,15 @@ const VideoList = () => {
                                             src={firstVideoLink}
                                             controls
                                             muted={fullscreenMedia !== index}
+                                            volume={globalVolume}
                                             loop
-                                            onLoadedData={() => handleMediaLoad(index)}
+                                            onLoadedData={() => {
+                                                handleMediaLoad(index);
+                                                // Apply global volume on load
+                                                if (mediaRefs.current[index]) {
+                                                    mediaRefs.current[index].volume = globalVolume;
+                                                }
+                                            }}
                                             onError={(e) => handleVideoError(e, firstVideoLink)}
                                             onLoadStart={() => {
                                                 setCookies();
@@ -1064,7 +1870,7 @@ const VideoList = () => {
                                             onError={(e) => handleImageError(e, firstVideoLink, index)}
                                         />
                                     )}
-                                    {fullscreenMedia === index && videoLinks.slice(1).map((link, i) => (
+                                    {fullscreenMedia === index && videoLinks && Array.isArray(videoLinks) && videoLinks.slice(1).map((link, i) => (
                                         <div key={i} className="fullscreen-media-container">
                                             <img className='fullscreen-media'
                                                 ref={el => mediaRefs.current[`${index}_${i}`] = el}
@@ -1099,7 +1905,7 @@ const VideoList = () => {
                                     >
                                         <i className="fas fa-link"></i>
                                     </button>
-                                    {!postLink.includes('kusowanka') && (
+                                    {(!postLink.includes('kusowanka') && !postLink.includes('donmai')  && !postLink.includes('e621')) && (
                                         <button
                                             className="similar-icon"
                                             onClick={(e) => {
@@ -1112,18 +1918,16 @@ const VideoList = () => {
                                         </button>
                                     )}
                                 </div>
-                                {isLoggedIn && (
-                                    <button
-                                        className="remove-icon"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleRemove(postLink); // Now we just pass postLink, not the specific videoLink
-                                        }}
-                                        aria-label="Remove media"
-                                    >
+                                <button
+                                    className="remove-icon"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemove(postLink);
+                                    }}
+                                    aria-label="Remove media"
+                                >
                                         <i className="fas fa-trash"></i>
-                                    </button>
-                                )}
+                                </button>
                             </div>
                         );
                     })}
@@ -1132,74 +1936,159 @@ const VideoList = () => {
                     )}
                 </Masonry>
                 <div id="bottom-of-page"></div>
-                {!showLogin && (
-                    <div className="overlay-buttons">
-                        {isLoggedIn && (
-                            <button
-                                onClick={() => setShowSettings(!showSettings)}
-                                className="settings-button"
-                                aria-label="Settings"
-                            >
-                                <i className="fas fa-cog"></i>
-                            </button>
-                        )}
-                        <button
-                            onClick={() => setAutoScroll(!autoScroll)}
-                            className={`auto-scroll-button ${autoScroll ? 'active' : ''}`}
-                            aria-label="Toggle auto scroll"
-                        >
-                            <i className="fas fa-arrow-down"></i>
+                <div className="overlay-buttons">
+                    <button
+                        onClick={handleSettingsOpen}
+                        className="settings-button"
+                        aria-label="Settings"
+                    >
+                        <i className="fas fa-cog"></i>
                         </button>
-                        <button
-                            onClick={() => isLoggedIn ? setShowProfileMenu(!showProfileMenu) : setShowLogin(true)}
-                            className={`profile-button ${isLoggedIn ? 'logged-in' : ''}`}
-                            aria-label="Profile"
-                        >
-                            <i className={`fas ${isLoggedIn ? 'fa-user-check' : 'fa-user'}`}></i>
-                        </button>
-                        {showProfileMenu && isLoggedIn && (
-                            <div className="profile-menu">
-                                <div className="profile-menu-header">
-                                    <h3>Profile Menu</h3>
-                                    <button onClick={() => setShowProfileMenu(false)}>
-                                        <i className="fas fa-times"></i>
-                                    </button>
-                                </div>
-                                <div className="profile-menu-content">
-                                    <button className="profile-menu-button" onClick={handleExport}>
-                                        <i className="fas fa-download"></i>
-                                        Export Collection
-                                    </button>
-                                    <label className="profile-menu-button">
-                                        <i className="fas fa-upload"></i>
-                                        Import Collection
-                                        <input
-                                            type="file"
-                                            accept=".json"
-                                            onChange={handleImport}
-                                            style={{ display: 'none' }}
-                                        />
-                                    </label>
-                                    <label className="profile-menu-button">
-                                        <i className="fas fa-list"></i>
-                                        Import Scrape List
-                                        <input
-                                            type="file"
-                                            accept=".json"
-                                            onChange={handleImportScrapeList}
-                                            style={{ display: 'none' }}
-                                        />
-                                    </label>
-                                    <div className="profile-menu-divider"></div>
-                                    <button className="profile-menu-button danger" onClick={handleLogout}>
-                                        <i className="fas fa-sign-out-alt"></i>
-                                        Logout
-                                    </button>
-                                </div>
+                    <button
+                        onClick={() => {
+                            const newAutoScroll = !autoScroll;
+                            setAutoScroll(newAutoScroll);
+                            saveAutoScrollPreference(newAutoScroll);
+                        }}
+                        className={`auto-scroll-button ${autoScroll ? 'active' : ''}`}
+                        aria-label="Toggle auto scroll"
+                    >
+                        <i className="fas fa-arrow-down"></i>
+                    </button>
+                    {showProfileMenu && (
+                        <div className="profile-menu">
+                            <div className="profile-menu-header">
+                                <h3>Profile Menu</h3>
+                                <button onClick={() => setShowProfileMenu(false)}>
+                                    <i className="fas fa-times"></i>
+                                </button>
                             </div>
-                        )}
-                    </div>
-                )}
+                            <div className="profile-menu-content">
+                                {isLoggedIn ? (
+                                    <>
+                                        <button className="profile-menu-button" onClick={handleExport}>
+                                            <i className="fas fa-download"></i>
+                                            Export Collection
+                                        </button>
+                                        <label className="profile-menu-button">
+                                            <i className="fas fa-upload"></i>
+                                            Import Collection
+                                            <input
+                                                type="file"
+                                                accept=".json"
+                                                onChange={handleImport}
+                                                style={{ display: 'none' }}
+                                            />
+                                        </label>
+                                        <label className="profile-menu-button">
+                                            <i className="fas fa-list"></i>
+                                            Import Scrape List
+                                            <input
+                                                type="file"
+                                                accept=".json"
+                                                onChange={handleImportScrapeList}
+                                                style={{ display: 'none' }}
+                                            />
+                                        </label>
+                                        <div className="profile-menu-divider"></div>
+                                        <button className="profile-menu-button danger" onClick={handleClearCollection}>
+                                            <i className="fas fa-ban"></i>
+                                            Clear Collection
+                                        </button>
+                                        <button className="profile-menu-button danger" onClick={handleLogout}>
+                                            <i className="fas fa-sign-out-alt"></i>
+                                            Logout
+                                        </button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <button className="profile-menu-button" onClick={() => {
+                                            setShowLogin(true);
+                                            setShowProfileMenu(false);
+                                        }}>
+                                            <i className="fas fa-sign-in-alt"></i>
+                                            Login
+                                        </button>
+                                        <button className="profile-menu-button" onClick={() => {
+                                            setShowLogin(true);
+                                            setIsRegistering(true);
+                                            setShowProfileMenu(false);
+                                        }}>
+                                            <i className="fas fa-user-plus"></i>
+                                            Register
+                                        </button>
+                                        <div className="profile-menu-divider"></div>
+                                        <button className="profile-menu-button" onClick={() => {
+                                            // For non-logged in users, directly export from localStorage
+                                            try {
+                                                const localData = getFromLocalStorage();
+                                                if (localData && localData.length > 0) {
+                                                    const dataStr = JSON.stringify(localData, null, 2);
+                                                    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                                                    const url = URL.createObjectURL(dataBlob);
+                                                    const a = document.createElement('a');
+                                                    a.href = url;
+                                                    a.download = 'kupo-nuts-local-collection.json';
+                                                    document.body.appendChild(a);
+                                                    a.click();
+                                                    document.body.removeChild(a);
+                                                    URL.revokeObjectURL(url);
+                                                    showNotification('Local collection exported successfully', 'success');
+                                                } else {
+                                                    showNotification('No local collection to export', 'info');
+                                                }
+                                            } catch (error) {
+                                                showNotification('Failed to export local collection', 'error');
+                                            }
+                                        }}>
+                                            <i className="fas fa-download"></i>
+                                            Export Local Collection
+                                        </button>
+                                        <label className="profile-menu-button">
+                                            <i className="fas fa-upload"></i>
+                                            Import Collection
+                                            <input
+                                                type="file"
+                                                accept=".json"
+                                                onChange={(event) => {
+                                                    try {
+                                                        const file = event.target.files[0];
+                                                        if (!file) return;
+                                                        
+                                                        const reader = new FileReader();
+                                                        reader.onload = (e) => {
+                                                            try {
+                                                                const json = JSON.parse(e.target.result);
+                                                                if (Array.isArray(json)) {
+                                                                    saveToLocalStorage(json);
+                                                                    setMediaUrls(json.map(item => [item.postLink || '', item.videoLinks]));
+                                                                    showNotification('Local collection imported successfully', 'success');
+                                                                } else {
+                                                                    showNotification('Invalid file format', 'error');
+                                                                }
+                                                            } catch (error) {
+                                                                showNotification('Failed to parse import file', 'error');
+                                                            }
+                                                        };
+                                                        reader.readAsText(file);
+                                                    } catch (error) {
+                                                        showNotification('Failed to read import file', 'error');
+                                                    }
+                                                    event.target.value = '';
+                                                }}
+                                                style={{ display: 'none' }}
+                                            />
+                                        </label>
+                                        <button className="profile-menu-button danger" onClick={handleClearCollection}>
+                                            <i className="fas fa-ban"></i>
+                                            Clear Local Collection
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
+                </div>
                 {showSettings && (
                     <div className="settings-dialog">
                         <div className="settings-content">
@@ -1210,50 +2099,108 @@ const VideoList = () => {
                                 </button>
                             </div>
                             <div className="settings-body">
-                                <div className="settings-item">
-                                    <label htmlFor="scrape-url">Scrape URL</label>
-                                    <div className="scrape-input-container">
-                                        <input
-                                            id="scrape-url"
-                                            value={scrapeUrl}
-                                            onChange={(e) => setScrapeUrl(e.target.value)}
-                                            onKeyPress={handleScrapeInputKeyPress}
-                                            placeholder="Enter URL to scrape"
-                                        />
-                                        <button
-                                            onClick={() => {
-                                                if (scrapeUrl.includes('@')) {
-                                                    const listId = scrapeUrl.replace('@', '');
-                                                    fetchTweetsFromList(listId);
-                                                } else if (scrapeUrl.includes('❤️')) {
-                                                    scrapeSavedLinks();
-                                                } else {
-                                                    addScrapeUrlToFile(scrapeUrl);
-                                                    handleScrape();
-                                                }
-                                                setScrapeUrl('');
-                                            }}
-                                            aria-label="Scrape URL"
-                                        >
-                                            Scrape
-                                        </button>
+                                {/* Content filter moved to top bar, removed from here */}
+                                
+                                {isLoggedIn && (
+                                    <div className="settings-item">
+                                        <label>Include Demo Content:</label>
+                                        <div className="default-links-toggle settings-toggle">
+                                            <button 
+                                                className={`content-filter-option ${showDefaultLinks ? 'active' : ''}`}
+                                                onClick={() => {
+                                                    const newValue = true;
+                                                    setShowDefaultLinks(newValue);
+                                                    saveShowDefaultLinksPreference(newValue);
+                                                    setCurrentPage(1);
+                                                    setMediaUrls([]);
+                                                    fetchMedia(1, initialMediaPerPage);
+                                                }}
+                                            >
+                                                Show
+                                            </button>
+                                            <button 
+                                                className={`content-filter-option ${!showDefaultLinks ? 'active' : ''}`}
+                                                onClick={() => {
+                                                    const newValue = false;
+                                                    setShowDefaultLinks(newValue);
+                                                    saveShowDefaultLinksPreference(newValue);
+                                                    setCurrentPage(1);
+                                                    setMediaUrls([]);
+                                                    fetchMedia(1, initialMediaPerPage);
+                                                }}
+                                            >
+                                                Hide
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
+                                )}
+                                
                                 <div className="settings-item">
                                     <label htmlFor="filter">Sort by:</label>
                                     <select 
                                         id="filter" 
                                         value={filter} 
                                         onChange={(e) => {
-                                            const newFilter = e.target.value;
-                                            setFilter(newFilter);
-                                            saveFilterPreference(newFilter);
+                                            handleFilterChange(e.target.value);
                                         }}
                                     >
                                         <option value="Default">Default</option>
                                         <option value="Newest">Newest</option>
                                         <option value="Random">Random</option>
+                                        <option value="Oldest">Oldest</option>
                                     </select>
+                                </div>
+                                
+                                <div className="settings-item">
+                                    <label htmlFor="scroll-speed">Auto-Scroll Speed: {scrollSpeed}px/tick</label>
+                                    <input
+                                        id="scroll-speed"
+                                        type="range"
+                                        min="1"
+                                        max="10"
+                                        value={scrollSpeed}
+                                        onChange={(e) => {
+                                            const newSpeed = parseInt(e.target.value, 10);
+                                            setScrollSpeed(newSpeed);
+                                            saveScrollSpeedPreference(newSpeed);
+                                            updateSliderFill(newSpeed);
+                                        }}
+                                        className="scroll-speed-slider"
+                                    />
+                                    <div className="speed-range-labels">
+                                        <span>Slow</span>
+                                        <span>Fast</span>
+                                    </div>
+                                </div>
+
+                                <div className="settings-item">
+                                    <label htmlFor="volume-control">Volume: {Math.round(globalVolume * 100)}%</label>
+                                    <input
+                                        id="volume-control"
+                                        type="range"
+                                        min="0"
+                                        max="1"
+                                        step="0.01"
+                                        value={globalVolume}
+                                        onChange={(e) => {
+                                            const newVolume = parseFloat(e.target.value);
+                                            setGlobalVolume(newVolume);
+                                            saveVolumePreference(newVolume);
+                                            updateVolumeSliderFill(newVolume);
+                                        }}
+                                        className="volume-slider"
+                                    />
+                                </div>
+
+                                <div className="settings-item">
+                                    <label htmlFor="tag-blacklist">Tag Blacklist (comma-separated):</label>
+                                    <input
+                                        type="text"
+                                        id="tag-blacklist"
+                                        value={tagBlacklist}
+                                        onChange={handleTagBlacklistChange}
+                                        placeholder="Enter tags to blacklist"
+                                    />
                                 </div>
                             </div>
                         </div>
@@ -1264,19 +2211,11 @@ const VideoList = () => {
                         <div className="login-content">
                             <div className="login-header">
                                 <h2>{isRegistering ? 'Create Account' : 'Login'}</h2>
-                                <button onClick={() => {
-                                    setShowLogin(false);
-                                    setIsRegistering(false);
-                                    setLoginError('');
-                                }}>
+                                <button onClick={() => setShowLogin(false)}>
                                     <i className="fas fa-times"></i>
                                 </button>
                             </div>
-                            {loginError && (
-                                <div className="login-error">
-                                    {loginError}
-                                </div>
-                            )}
+                            {loginError && <div className="login-error">{loginError}</div>}
                             <form className="login-form" onSubmit={isRegistering ? handleRegister : handleLogin}>
                                 <input
                                     type="text"
@@ -1346,6 +2285,27 @@ const VideoList = () => {
                                     </label>
                                 </div>
                             )}
+                        </div>
+                    </div>
+                )}
+                {showConfirmClear && (
+                    <div className="login-dialog">
+                        <div className="login-content">
+                            <div className="login-header">
+                                <h2>Confirm Clear</h2>
+                                <button onClick={cancelClearCollection}>
+                                    <i className="fas fa-times"></i>
+                                </button>
+                            </div>
+                            <p>Are you sure you want to clear your collection? This action cannot be undone.</p>
+                            <div className="login-options">
+                                <button onClick={confirmClearCollection} className="profile-menu-button danger">
+                                    Yes, Clear Collection
+                                </button>
+                                <button onClick={cancelClearCollection}>
+                                    Cancel
+                                </button>
+                            </div>
                         </div>
                     </div>
                 )}

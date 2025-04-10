@@ -10,11 +10,57 @@ const session = require('express-session');
 const cookieParser = require('cookie-parser');
 const { scrapeVideos } = require('./scraper');
 const axios = require('axios');
-// Add FileStore for session persistence
-const FileStore = require('session-file-store')(session);
+const { sequelize, User, initializeDatabase } = require('./database'); // Import the database
+// Add Socket.IO for real-time updates
+const http = require('http');
+const socketIo = require('socket.io');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+// Create HTTP server instance
+const server = http.createServer(app);
+
+// Initialize Socket.IO with CORS options that match Express
+const io = socketIo(server, {
+    cors: {
+        origin: function (origin, callback) {
+            if (!origin || allowedOrigins.includes(origin)) {
+                callback(null, true);
+            } else {
+                console.log(`Socket.IO: Origin not in allowed list: ${origin}`);
+                callback(null, false);
+            }
+        },
+        credentials: true,
+        methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-guest-id']
+    }
+});
+
+// Socket.IO connection handling
+io.on('connection', (socket) => {
+    console.log(`New WebSocket connection: ${socket.id}`);
+    
+    // Set user information when they authenticate
+    socket.on('authenticate', (userData) => {
+        if (userData.isGuest) {
+            // Support for non-logged in users with guest IDs
+            socket.guestId = userData.guestId;
+            socket.isGuest = true;
+            console.log(`Guest authenticated on socket with ID: ${userData.guestId.substring(0, 8)}...`);
+        } else {
+            // Regular user authentication
+            socket.username = userData.username;
+            socket.isGuest = false;
+            console.log(`User authenticated on socket: ${socket.username}`);
+        }
+    });
+    
+    socket.on('disconnect', () => {
+        console.log(`WebSocket disconnected: ${socket.id}`);
+    });
+});
 
 // Constants
 const PASSWORD_MIN_LENGTH = 12;
@@ -23,29 +69,37 @@ const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_TIME = 15 * 60 * 1000; // 15 minutes
 
 // In-memory storage
-const users = {};
 const loginAttempts = {};
+
+// Add a cleanup function for loginAttempts
+const cleanupLoginAttempts = () => {
+    const currentTime = Date.now();
+    const staleTime = LOCKOUT_TIME * 2; // Remove entries older than 2x lockout time
+    
+    Object.keys(loginAttempts).forEach(ip => {
+        if (currentTime - loginAttempts[ip].lastAttempt > staleTime) {
+            delete loginAttempts[ip];
+        }
+    });
+};
+
+// Run cleanup every hour
+setInterval(cleanupLoginAttempts, 60 * 60 * 1000);
 
 // Helper functions for file paths and user data
 const getDataDir = () => {
-    // Use a directory path that pptruser has permission to access
     let renderDataDir;
     
     if (process.env.RENDER_SERVICE_NAME) {
-        // When running on Render, use a directory inside the app directory
-        // pptruser definitely has permissions to this location
         renderDataDir = path.join(__dirname, '../../data');
     } else {
-        // In development or other environments
         renderDataDir = path.join(__dirname, '../../data');
     }
         
-    // Create the directory if it doesn't exist
     if (!fs.existsSync(renderDataDir)) {
         fs.mkdirSync(renderDataDir, { recursive: true, mode: 0o755 });
     }
     
-    // Set as environment variable for other modules to use
     process.env.DATA_DIR = renderDataDir;
     return renderDataDir;
 };
@@ -110,7 +164,7 @@ const corsOptions = {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-guest-id']
 };
 
 // Apply CORS middleware
@@ -125,20 +179,7 @@ const getCookieOptions = () => ({
     maxAge: 24 * 60 * 60 * 1000 // 24 hours
 });
 
-// Create sessions directory in the data folder
-const sessionsDir = path.join(getDataDir(), 'sessions');
-if (!fs.existsSync(sessionsDir)) {
-    fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o755 });
-}
-
-// Use FileStore instead of the default MemoryStore
 app.use(session({
-    store: new FileStore({
-        path: sessionsDir,
-        ttl: 86400, // 1 day in seconds
-        reapInterval: 3600, // Clean up expired sessions every hour
-        retries: 1
-    }),
     secret: process.env.SESSION_SECRET || 'your-secret-key',
     resave: false,
     saveUninitialized: false,
@@ -149,39 +190,51 @@ app.use(bodyParser.json({limit: '50mb'}));
 app.use(bodyParser.urlencoded({limit: '50mb', extended: true}));
 app.use(cookieParser());
 
-// Middleware for authentication and validation
+// Middleware for authentication with guest support
 const authenticateToken = (req, res, next) => {
     const token = req.cookies.token;
 
-    if (!token) {
-        return res.status(401).json({ message: 'Authentication required' });
-    }
+    if (token) {
+        try {
+            const user = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret');
+            req.user = user;
+            req.isGuest = false;
 
-    try {
-        const user = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret');
-        req.user = user;
-        
-        // Check if user exists in our users object
-        if (!users[user.username]) {
-            // If user isn't loaded yet but folder exists, add it now
-            const userDir = getUserDir(user.username);
-            if (fs.existsSync(userDir)) {
-                users[user.username] = {
-                    password: "$2b$10$defaulthashforlegacyusers",
-                    createdAt: new Date()
-                };
-                console.log(`Added missing user from token: ${user.username}`);
-                next();
-                return;
-            }
-            return res.status(401).json({ message: 'User not found' });
+            // Retrieve the user from the database
+            User.findOne({ where: { username: user.username } })
+                .then(existingUser => {
+                    if (!existingUser) {
+                        return res.status(401).json({ message: 'User not found' });
+                    }
+
+                    req.user = existingUser; // Attach the user object from the database to the request
+
+                    return next(); // User is authenticated via token, proceed
+                })
+                .catch(err => {
+                    console.error('Database error:', err);
+                    return res.status(500).json({ message: 'Database error' });
+                });
+
+        } catch (err) {
+            console.error('Token verification error:', err);
+            res.clearCookie('token', getCookieOptions());
+            return res.status(403).json({ message: 'Invalid or expired token' });
         }
-        
-        next();
-    } catch (err) {
-        console.error('Token verification error:', err);
-        res.clearCookie('token', getCookieOptions());
-        return res.status(403).json({ message: 'Invalid or expired token' });
+    } else {
+        // Check for guest ID in request if no valid token
+        const guestId = req.headers['x-guest-id'];
+        console.log(`Guest ID from header: ${guestId}`);
+        if (guestId) {
+            req.isGuest = true;
+            req.guestId = guestId;
+            // For certain public endpoints, allow guests through
+            if (req.path.includes('/api/scrape') || req.path.includes('/api/similar') || req.path.includes('/api/search-tags') || req.path.includes('/api/local-operation')) {
+                return next();
+            }
+        } else {
+            return res.status(401).json({ message: 'Authentication required' });
+        }
     }
 };
 
@@ -218,7 +271,6 @@ const checkLoginAttempts = (req, res, next) => {
                 waitTime: Math.ceil((LOCKOUT_TIME - (currentTime - loginAttempts[ip].lastAttempt)) / 1000 / 60)
             });
         } else {
-            // Reset attempts after lockout period
             loginAttempts[ip].attempts = 0;
         }
     }
@@ -234,20 +286,21 @@ app.post('/api/register', validatePassword, async (req, res) => {
             return res.status(400).json({ message: 'Username and password are required' });
         }
 
-        if (users[username]) {
+        // Check if the user already exists in the database
+        const existingUser = await User.findOne({ where: { username: username } });
+        if (existingUser) {
             return res.status(409).json({ message: 'Username already exists' });
         }
 
         const hashedPassword = await passwordUtils.hash(password);
-        users[username] = {
-            password: hashedPassword,
-            createdAt: new Date()
-        };
+
+        // Create the user in the database
+        await User.create({
+            username: username,
+            password: hashedPassword
+        });
 
         initializeUserFiles(username);
-        
-        const passwordPath = path.join(getUserDir(username), 'password.txt');
-        fs.writeFileSync(passwordPath, hashedPassword);
 
         res.status(201).json({ message: 'User registered successfully' });
     } catch (error) {
@@ -269,7 +322,8 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             return res.status(400).json({ message: 'Username and password are required' });
         }
 
-        const user = users[username];
+        // Retrieve the user from the database
+        const user = await User.findOne({ where: { username: username } });
         if (!user) {
             loginAttempts[ip].attempts++;
             loginAttempts[ip].lastAttempt = Date.now();
@@ -283,11 +337,10 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
             return res.status(401).json({ message: 'Invalid username or password' });
         }
 
-        // Reset login attempts on successful login
         loginAttempts[ip].attempts = 0;
 
         const token = jwt.sign(
-            { username },
+            { username: user.username }, // Use the username from the database
             process.env.JWT_SECRET || 'your-jwt-secret',
             { expiresIn: '24h' }
         );
@@ -303,15 +356,38 @@ app.post('/api/login', checkLoginAttempts, async (req, res) => {
 app.post('/api/logout', (req, res) => {
     res.clearCookie('token', getCookieOptions());
     
-    if (req.session) {
-        req.session.destroy(err => {
-            if (err) {
-                console.error('Error destroying session:', err);
-            }
-        });
+    res.json({ message: 'Logout successful' });
+});
+
+// Add the verify-auth endpoint
+app.get('/api/verify-auth', (req, res) => {
+    const token = req.cookies.token;
+    
+    if (!token) {
+        return res.status(401).json({ message: 'No authentication token found' });
     }
     
-    res.json({ message: 'Logout successful' });
+    try {
+        const user = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret');
+        
+        // Retrieve the user from the database
+        User.findOne({ where: { username: user.username } }).then(existingUser => {
+            if (!existingUser) {
+                return res.status(401).json({ message: 'User not found' });
+            }
+            
+            // Authentication successful
+            console.log(`User ${user.username} verified via token`);
+            res.status(200).json({ username: user.username });
+        }).catch(err => {
+            console.error('Database error:', err);
+            return res.status(500).json({ message: 'Database error' });
+        });
+    } catch (err) {
+        console.error('Token verification error:', err);
+        res.clearCookie('token', getCookieOptions());
+        return res.status(403).json({ message: 'Invalid or expired token' });
+    }
 });
 
 // API Routes - User Profile
@@ -322,12 +398,62 @@ app.get('/api/profile', authenticateToken, (req, res) => {
 // API Routes - Media Management
 app.post('/api/scrape', authenticateToken, async (req, res) => {
     const { url } = req.body;
-    const username = req.user.username;
+    const username = req.user ? req.user.username : null;
+    const isGuest = req.isGuest;
+    const guestId = req.guestId;
 
     try {
-        console.log(`Starting scrape for user ${username} with URL: ${url}`);
-        const result = await scrapeVideos(url, null, username);
+        console.log(`Starting scrape for ${isGuest ? `guest ${guestId}` : `user ${username}`} with URL: ${url}`);
+
+        // Create a progress callback that emits WebSocket events
+        const progressCallback = (count, message, isComplete = false, newItems = []) => {
+            const userSockets = Array.from(io.sockets.sockets.values())
+                .filter(s => {
+                    if (isGuest) {
+                        return s.guestId === guestId;
+                    } else {
+                        return s.username === username;
+                    }
+                });
+
+            if (userSockets.length > 0) {
+                userSockets.forEach(socket => {
+                    socket.emit('scrape_progress', {
+                        count,
+                        message: message || `Found ${count} items`,
+                        isComplete,
+                        newItems
+                    });
+                });
+            }
+        };
+
+        // For guests, attempt a real scrape but don't save to server
+        if (isGuest) {
+            try {
+                // Use scrapeVideos with skipSave option for guests
+                const result = await scrapeVideos(url, null, null, progressCallback, { skipSave: true });
+
+                return res.status(200).json({
+                    message: 'Guest scraping initiated - results will be saved to your browser',
+                    guestId: guestId,
+                    linksAdded: result.linksAdded
+                });
+            } catch (error) {
+                console.error('Error with guest scraping:', error);
+                return res.status(500).json({
+                    message: 'Scraping failed',
+                    error: error.message
+                });
+            }
+        }
+
+        // Normal scraping for authenticated users - explicitly set skipSave to false
+        const result = await scrapeVideos(url, null, username, progressCallback, { skipSave: false });
         console.log('Scrape completed with result:', result);
+
+        // Final update via WebSocket
+        progressCallback(result.linksAdded, 'Scraping completed successfully', true);
 
         res.status(200).json({
             message: 'Scraping successful',
@@ -347,10 +473,8 @@ app.post('/api/remove', authenticateToken, (req, res) => {
         let data = fs.readFileSync(filePath, 'utf8');
         let links = JSON.parse(data);
         
-        // Find the link with matching postLink and remove its videoLinks
         const updatedLinks = links.map(link => {
             if (link.postLink === postLink) {
-                // Keep the post link but remove the video links
                 return { ...link, videoLinks: [] };
             }
             return link;
@@ -362,6 +486,98 @@ app.post('/api/remove', authenticateToken, (req, res) => {
     } catch (error) {
         console.error('Error removing media:', error);
         res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+app.post('/api/clear-collection', authenticateToken, async (req, res) => {
+    const username = req.user ? req.user.username : null;
+    const isGuest = req.isGuest;
+    const guestId = req.guestId;
+
+    try {
+        if (isGuest) {
+            return res.status(403).json({ message: 'Clearing collection is not allowed for guest users.' });
+        }
+
+        const filePath = getUserFilePath(username, 'links');
+        fs.writeFileSync(filePath, '[]', 'utf8');
+        res.status(200).json({ message: 'Collection cleared successfully' });
+    } catch (error) {
+        console.error('Error clearing collection:', error);
+        res.status(500).json({ message: 'Failed to clear collection', error: error.message });
+    }
+});
+
+// Add new endpoint to simulate server responses for local storage operations
+// This allows us to keep the WebSocket architecture for non-logged in users
+app.post('/api/local-operation', (req, res) => {
+    const { operation, guestId, data } = req.body;
+    
+    if (!guestId) {
+        return res.status(400).json({ message: 'Guest ID is required' });
+    }
+    
+    try {
+        // Find all sockets for this guest
+        const guestSockets = Array.from(io.sockets.sockets.values())
+            .filter(s => s.isGuest && s.guestId === guestId);
+        
+        let response = { success: true };
+        let emitData = { ...data };
+        
+        // Add simulated server-side processing based on operation type
+        switch (operation) {
+            case 'scrape':
+                emitData = {
+                    count: 1,
+                    message: 'Added to local collection',
+                    isComplete: true,
+                    newItems: data.items || []
+                };
+                break;
+                
+            case 'tag_search':
+                emitData = {
+                    count: data.matchingItems?.length || 0,
+                    message: `Found ${data.matchingItems?.length || 0} local items with tag: ${data.query}`,
+                    isComplete: true,
+                    newItems: data.matchingItems || []
+                };
+                break;
+                
+            case 'remove':
+                emitData = {
+                    count: 1,
+                    message: 'Removed from local collection',
+                    isComplete: true
+                };
+                break;
+                
+            default:
+                emitData = {
+                    message: 'Operation processed',
+                    isComplete: true
+                };
+        }
+        
+        // Emit to all guest's sockets
+        if (guestSockets.length > 0) {
+            guestSockets.forEach(socket => {
+                socket.emit(`${operation}_progress`, emitData);
+            });
+            
+            console.log(`Emitted ${operation}_progress to ${guestSockets.length} socket(s) for guest ${guestId.substring(0, 8)}...`);
+        } else {
+            console.log(`No active sockets found for guest ${guestId.substring(0, 8)}...`);
+        }
+        
+        res.status(200).json(response);
+    } catch (error) {
+        console.error(`Error in local-operation (${operation}):`, error);
+        res.status(500).json({ 
+            message: `Error processing local ${operation}`,
+            error: error.message
+        });
     }
 });
 
@@ -416,7 +632,7 @@ app.post('/api/tweets', authenticateToken, async (req, res) => {
 });
 
 // API Routes - Scraping Management
-const scrapeSavedLinks = async (username) => {
+const scrapeSavedLinks = async (username, progressCallback) => {
     const filePath = getUserFilePath(username, 'scrape-links');
     if (!fs.existsSync(filePath)) {
         throw new Error('scrape-links.json file not found for user');
@@ -427,7 +643,7 @@ const scrapeSavedLinks = async (username) => {
 
     for (const link of links) {
         try {
-            await scrapeVideos(link, null, username);
+            await scrapeVideos(link, null, username, progressCallback);
         } catch (error) {
             console.error(`Error scraping link ${link}:`, error);
         }
@@ -436,7 +652,23 @@ const scrapeSavedLinks = async (username) => {
 
 app.post('/api/scrape-saved-links', authenticateToken, async (req, res) => {
     try {
-        await scrapeSavedLinks(req.user.username);
+        const progressCallback = (count, message, isComplete = false, newItems = []) => {
+            const userSockets = Array.from(io.sockets.sockets.values())
+                .filter(s => s.username === req.user.username);
+                
+            if (userSockets.length > 0) {
+                userSockets.forEach(socket => {
+                    socket.emit('scrape_progress', {
+                        count,
+                        message: message || `Processed ${count} saved links`,
+                        isComplete,
+                        newItems
+                    });
+                });
+            }
+        };
+        
+        await scrapeSavedLinks(req.user.username, progressCallback);
         res.status(200).json({ message: 'Scraping saved links successful' });
     } catch (error) {
         console.error('Error scraping saved links:', error);
@@ -523,40 +755,40 @@ app.get('/api/export-links', authenticateToken, (req, res) => {
     }
 });
 
-app.post('/api/import-links', authenticateToken, (req, res) => {
-    const filePath = getUserFilePath(req.user.username, 'links');
-    
+app.post('/api/import-links', authenticateToken, async (req, res) => {
+    const { body: links } = req;
+    const username = req.user ? req.user.username : null;
+    const isGuest = req.isGuest;
+    const guestId = req.guestId;
+
     try {
-        const newLinks = req.body;
-        
-        if (!Array.isArray(newLinks)) {
-            return res.status(400).json({ error: 'Invalid format: expected array' });
+        if (!links || !Array.isArray(links)) {
+            return res.status(400).json({ message: 'Invalid data format. Expected an array of links.' });
         }
 
-        const validLinks = newLinks.map(link => ({
-            postLink: link.postLink,
-            videoLinks: Array.isArray(link.videoLinks) ? link.videoLinks : [link.videoLinks]
-        })).filter(link => 
-            link && 
-            typeof link === 'object' && 
-            typeof link.postLink === 'string' && 
-            Array.isArray(link.videoLinks) &&
-            link.videoLinks.every(vl => typeof vl === 'string')
-        );
-
-        if (validLinks.length === 0) {
-            return res.status(400).json({ error: 'No valid links found in import file' });
+        if (isGuest) {
+            return res.status(403).json({ message: 'Importing links is not allowed for guest users.' });
         }
 
-        fs.writeFileSync(filePath, JSON.stringify(validLinks, null, 2), 'utf8');
-        
-        res.json({ 
-            message: 'Links imported successfully - replaced existing collection', 
-            total: validLinks.length
+        const filePath = getUserFilePath(username, 'links');
+        let existingLinks = [];
+
+        if (fs.existsSync(filePath)) {
+            existingLinks = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        }
+
+        const newLinks = links.filter(link => {
+            return !existingLinks.some(existingLink => existingLink.postLink === link.postLink);
         });
+
+        const allLinks = [...existingLinks, ...newLinks];
+
+        fs.writeFileSync(filePath, JSON.stringify(allLinks, null, 2), 'utf8');
+
+        res.status(200).json({ message: `Successfully imported ${newLinks.length} new links.` });
     } catch (error) {
         console.error('Error importing links:', error);
-        res.status(500).json({ error: 'Failed to import links' });
+        res.status(500).json({ message: 'Failed to import links', error: error.message });
     }
 });
 
@@ -612,36 +844,242 @@ app.post('/api/import-scrape-list', authenticateToken, async (req, res) => {
 // API Routes - Similar Content
 app.post('/api/similar', authenticateToken, async (req, res) => {
     const { url } = req.body;
-    const username = req.user.username;
+    const username = req.user ? req.user.username : null;
+    const isGuest = req.isGuest;
+    const guestId = req.guestId;
 
     try {
         if (!url) {
             return res.status(400).json({ message: 'URL is required' });
         }
         
-        // Fix: There seems to be a missing testScraper reference
-        // Assuming it's a module like scrapeVideos and should be imported
-        // For now, we'll just use the scrapeVideos function
-        
-        const userLinksPath = getUserFilePath(username, 'links');
-        const initialCount = fs.existsSync(userLinksPath) ? 
-            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
+        // Create progress callback for WebSocket updates
+        const progressCallback = (count, message, isComplete = false, newItems = []) => {
+            const userSockets = Array.from(io.sockets.sockets.values())
+                .filter(s => {
+                    if (isGuest) {
+                        return s.guestId === guestId;
+                    } else {
+                        return s.username === username;
+                    }
+                });
+                
+            if (userSockets.length > 0) {
+                userSockets.forEach(socket => {
+                    socket.emit('similar_progress', {
+                        count,
+                        message: message || `Found ${count} similar items`,
+                        isComplete,
+                        newItems
+                    });
+                });
+            }
+        };
 
-        await scrapeVideos(url, null, username);
-        
-        const finalCount = fs.existsSync(userLinksPath) ? 
-            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
-        
+        // For guests, perform actual scraping but skip server-side saving
+        if (isGuest) {
+            try {
+                const result = await scrapeVideos(url, null, null, progressCallback, { skipSave: true });
+
+                return res.status(200).json({
+                    message: 'Guest similar search initiated - results will be saved to your browser',
+                    count: result.linksAdded
+                });
+            } catch (error) {
+                console.error('Error with guest similar search:', error);
+                return res.status(500).json({
+                    message: 'Failed to find similar posts',
+                    error: error.message
+                });
+            }
+        }
+
+        // Normal processing for authenticated users - explicitly set skipSave to false
+        const initialCount = fs.existsSync(getUserFilePath(username, 'links')) ? 
+            JSON.parse(fs.readFileSync(getUserFilePath(username, 'links'), 'utf8')).length : 0;
+
+        await scrapeVideos(url, null, username, progressCallback, { skipSave: false });
+
+        const finalCount = fs.existsSync(getUserFilePath(username, 'links')) ? 
+            JSON.parse(fs.readFileSync(getUserFilePath(username, 'links'), 'utf8')).length : 0;
+
         const count = finalCount - initialCount;
+        
+        // Final update via WebSocket
+        progressCallback(count, count > 0 ? 'Similar posts found successfully' : 'No new similar posts found', true);
 
         res.status(200).json({ 
             message: count > 0 ? 'Similar posts found successfully' : 'No new similar posts found', 
             count 
         });
-    } catch (error) {
+    } 
+    catch (error) {
         console.error('Error finding similar posts:', error);
         res.status(500).json({ 
             message: error.message || 'Failed to find similar posts'
+        });
+    }
+});
+
+app.post('/api/search-tags', authenticateToken, async (req, res) => {
+    const { query, contentType } = req.body;
+    const username = req.user ? req.user.username : null;
+    const isGuest = req.isGuest;
+    const guestId = req.guestId;
+
+    try {
+        console.log(`Tag search request from ${isGuest ? `guest ${guestId}` : `user ${username}`}: tag="${query}", contentType=${contentType}`);
+        
+        if (!query || query.trim() === '') {
+            return res.status(400).json({
+                message: 'Search query is required',
+                count: 0,
+                media: []
+            });
+        }
+        
+        // Create progress callback for WebSocket updates
+        const progressCallback = (count, message, isComplete = false, newItems = []) => {
+            const userSockets = Array.from(io.sockets.sockets.values())
+                .filter(s => {
+                    if (isGuest) {
+                        return s.guestId === guestId;
+                    } else {
+                        return s.username === username;
+                    }
+                });
+                
+            if (userSockets.length > 0) {
+                userSockets.forEach(socket => {
+                    socket.emit('tag_search_progress', {
+                        count,
+                        message: message || `Found ${count} items for tag: ${query}`,
+                        isComplete,
+                        newItems // Include the new media items in the event
+                    });
+                });
+            }
+        };
+        
+        // For guests, attempt a real search but don't save to server
+        if (isGuest) {
+            // Encode the query for use in URL
+            const encodedQuery = encodeURIComponent(query.trim());
+            
+            // Create different formatted versions of the tag for different sites
+            const hyphenQuery = query.trim().replace(/\s+/g, '-');
+            const underscoreQuery = query.trim().replace(/\s+/g, '_');
+            
+            // Determine the URLs based on contentType
+            let urlsToScrape = [];
+            if (contentType === 0) {
+                // Safe mode - only use safebooru
+                urlsToScrape = [`https://safebooru.donmai.us/posts?tags=${encodedQuery}&z=2`];
+            } else {
+                // NSFW mode - use multiple sites with different tag formats
+                urlsToScrape = [
+                    `https://danbooru.donmai.us/posts?tags=${underscoreQuery}&z=2`,
+                    //`https://kusowanka.com/tag/${hyphenQuery}/`,
+                ];
+            }
+            
+            try {
+                for (const url of urlsToScrape) {
+                    // Attempt to scrape each URL but skip saving to server
+                    await scrapeVideos(url, null, null, progressCallback, { skipSave: true });
+                }
+                
+                return res.status(200).json({
+                    message: 'Guest tag search initiated - results will be saved to your browser',
+                    guestId: guestId,
+                    query
+                });
+            } catch (error) {
+                console.error('Error with guest tag search:', error);
+                return res.status(500).json({
+                    message: 'Tag search failed',
+                    error: error.message
+                });
+            }
+        }
+        
+        // Normal tag search process for authenticated users
+        const encodedQuery = encodeURIComponent(query.trim());
+        
+        const hyphenQuery = query.trim().replace(/\s+/g, '-');
+        const underscoreQuery = query.trim().replace(/\s+/g, '_');
+        
+        let urlsToScrape = [];
+        if (contentType === 0) {
+            urlsToScrape = [`https://safebooru.donmai.us/posts?tags=${encodedQuery}&z=2`];
+        } else {
+            urlsToScrape = [
+                `https://kusowanka.com/tag/${hyphenQuery}/`,
+                `https://r-34.xyz/tag/${underscoreQuery}`,
+            ];
+        }
+        
+        console.log(`Using search URLs: ${urlsToScrape.join(', ')}`);
+        
+        const userLinksPath = getUserFilePath(username, 'links');
+        const initialCount = fs.existsSync(userLinksPath) ? 
+            JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
+        
+        progressCallback(0, 'Starting tag search across multiple sites...');
+        
+        let totalItemsAdded = 0;
+        
+        for (let i = 0; i < urlsToScrape.length; i++) {
+            const url = urlsToScrape[i];
+            const siteName = new URL(url).hostname;
+            
+            try {
+                progressCallback(totalItemsAdded, `Searching site ${i+1} of ${urlsToScrape.length}: ${siteName}`);
+                
+                const result = await scrapeVideos(url, null, username, (count, message, isComplete, newItems = []) => {
+                    const siteProgressMessage = `${siteName}: ${message || `Found ${count} items`}`;
+                    progressCallback(totalItemsAdded + count, siteProgressMessage, false, newItems);
+                }, { skipSave: false }); // Explicitly set skipSave to false for logged-in users
+                
+                const currentCount = fs.existsSync(userLinksPath) ? 
+                    JSON.parse(fs.readFileSync(userLinksPath, 'utf8')).length : 0;
+                    
+                totalItemsAdded = currentCount - initialCount;
+                
+                progressCallback(totalItemsAdded, `Completed search on ${siteName}, found ${totalItemsAdded} items so far`);
+            } catch (error) {
+                console.error(`Error scraping ${siteName}:`, error);
+            }
+        }
+        
+        progressCallback(totalItemsAdded, 
+            totalItemsAdded > 0 ? 'Tag search completed successfully across all sites' : 'No results found for tag search',
+            true);
+        
+        let latestMedia = [];
+        if (totalItemsAdded > 0) {
+            const data = fs.readFileSync(userLinksPath, 'utf8');
+            const links = JSON.parse(data);
+            latestMedia = links.slice(-totalItemsAdded).map(item => [
+                item.postLink || '',
+                item.videoLinks,
+                item.tags || {}
+            ]);
+        }
+        
+        res.status(200).json({
+            message: totalItemsAdded > 0 ? 'Tag search completed successfully' : 'No results found for tag search',
+            count: totalItemsAdded,
+            media: latestMedia,
+            query,
+            contentType,
+            searchedSites: urlsToScrape.length
+        });
+    } catch (error) {
+        console.error('Error during tag search:', error);
+        res.status(500).json({
+            message: 'Failed to search tags',
+            error: error.message
         });
     }
 });
@@ -672,7 +1110,8 @@ app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../build', 'index.html'));
 });
 
-// Start server
-app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT} | Data dir: ${getDataDir()}`);
+// Start server - use the HTTP server instance with Socket.IO
+server.listen(PORT, '0.0.0.0', async () => {
+    await initializeDatabase(); // Initialize the database
+    console.log(`Server running on port ${PORT} with WebSocket support | Data dir: ${getDataDir()}`);
 });
