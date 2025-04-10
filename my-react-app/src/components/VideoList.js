@@ -6,7 +6,7 @@ import defaultLinks from './default-links.json';
 import config from '../config'; // Import the config file
 
 const API_URL = config.API_URL;
-
+//Cool
 const VideoList = () => {
     const [mediaUrls, setMediaUrls] = useState([]);
     const [currentPage, setCurrentPage] = useState(1);
