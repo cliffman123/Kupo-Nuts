@@ -1,10 +1,29 @@
 const { Sequelize, DataTypes } = require('sequelize');
 const path = require('path');
+const fs = require('fs');
+
+// Determine the appropriate data directory
+const getDataDir = () => {
+    // For Docker environments, use a directory we know is writable
+    let dataDir;
+    
+    if (process.env.RENDER_SERVICE_NAME) {
+        dataDir = path.join(__dirname, '../../data');
+    } else {
+        dataDir = path.join(__dirname, '../data');
+    }
+        
+    if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+    }
+    
+    return dataDir;
+};
 
 // Initialize Sequelize with SQLite
 const sequelize = new Sequelize({
     dialect: 'sqlite',
-    storage: path.join(__dirname, 'database.sqlite'), // Store the database file in the server directory
+    storage: path.join(getDataDir(), 'database.sqlite'), // Store the database file in a writable directory
     logging: false // Disable logging for cleaner output
 });
 
@@ -33,6 +52,7 @@ const initializeDatabase = async () => {
     try {
         await sequelize.authenticate();
         console.log('Connection to the database has been established successfully.');
+        console.log(`Using database at: ${path.join(getDataDir(), 'database.sqlite')}`);
         await sequelize.sync(); // This creates the table if it doesn't exist (and does nothing if it already exists)
         console.log('Database synced successfully.');
     } catch (error) {
@@ -43,5 +63,6 @@ const initializeDatabase = async () => {
 module.exports = {
     sequelize,
     User,
-    initializeDatabase
+    initializeDatabase,
+    getDataDir
 };

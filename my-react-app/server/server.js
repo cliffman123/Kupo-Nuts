@@ -1104,10 +1104,33 @@ app.get('/', (req, res) => {
 
 // Static file serving
 app.use(express.static(path.join(__dirname, '../build')));
+app.use(express.static(path.join(__dirname, '../../build')));
 
-// Client-side routing support
+// Client-side routing support with fallbacks for multiple possible build locations
 app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../build', 'index.html'));
+    const buildPaths = [
+        path.join(__dirname, '../build/index.html'),
+        path.join(__dirname, '../../build/index.html')
+    ];
+    
+    // Try each path until one works
+    for (const buildPath of buildPaths) {
+        if (fs.existsSync(buildPath)) {
+            return res.sendFile(buildPath);
+        }
+    }
+    
+    // If no build file exists, return a simple HTML response
+    return res.send(`
+        <html>
+            <head><title>Kupo-Nuts API</title></head>
+            <body>
+                <h1>Kupo-Nuts API Server</h1>
+                <p>The API server is running, but the client build files were not found.</p>
+                <p>API endpoints are available at: /api/login, /api/register, etc.</p>
+            </body>
+        </html>
+    `);
 });
 
 // Start server - use the HTTP server instance with Socket.IO
