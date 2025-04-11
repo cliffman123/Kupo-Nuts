@@ -578,8 +578,8 @@ const VideoList = () => {
         }
     };
 
-    const handleTagSearch = async () => {
-        if (!tagSearchQuery.trim()) {
+    const handleTagSearch = async (query) => {
+        if (!query || !query.trim()) {
             showNotification('Please enter a tag to search', 'info');
             return;
         }
@@ -1376,9 +1376,10 @@ const VideoList = () => {
             setTagFilter(null);
         } else {
             // Set the new tag filter
-            setTagSearchQuery(tag.trim());
-            handleTagSearch();
-            setTagFilter(tag.trim());
+            const query = searchQuery.trim();
+            setTagSearchQuery(query);
+            setTagFilter(query);
+            handleTagSearch(query);
         }
         
         // Close fullscreen view when setting a tag filter
@@ -1700,9 +1701,10 @@ const VideoList = () => {
             }
         } else {
             // It's a tag, trigger tag search
-            setTagSearchQuery(searchQuery.trim());
-            handleTagSearch();
-            setTagFilter(searchQuery.trim());
+            const query = searchQuery.trim();
+            setTagSearchQuery(query);
+            setTagFilter(query);
+            handleTagSearch(query);
         }
         
         // Clear the search input

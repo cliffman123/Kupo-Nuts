@@ -32,7 +32,7 @@ const CONFIG = {
   // Rate limiting
   RATE_LIMIT: {
     minTime: parseInt(process.env.RATE_LIMIT_MIN_TIME || '500'),
-    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '1'),
+    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '2'),
     retries: parseInt(process.env.RATE_LIMIT_RETRIES || '2')
   }
 };
