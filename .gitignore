@@ -1,3 +1,7 @@
 .vercel
 .env
 /node_modules
+/my-react-app/build
+/my-react-app/.env
+/my-react-app/data
+.KupoStart
