@@ -1,6 +1,14 @@
 // This is a forwarding file that points to the actual server implementation
 // This helps Render find the server when it looks in the root directory
 
+// Automatically set development mode if NODE_ENV is not already set
+if (!process.env.NODE_ENV) {
+  console.log('NODE_ENV not set, defaulting to development mode');
+  process.env.NODE_ENV = 'development';
+} else {
+  console.log(`Running in ${process.env.NODE_ENV} mode`);
+}
+
 console.log('Starting server from root forwarding file');
 console.log('Current directory:', process.cwd());
 console.log('Node modules available:', require('fs').existsSync('./node_modules'));

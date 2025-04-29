@@ -347,6 +347,50 @@ app.post('/api/logout', (req, res) => {
 app.get('/api/verify-auth', (req, res) => {
     const token = req.cookies.token;
     
+    // Check for development mode auto-login
+    if (process.env.NODE_ENV === 'development' && req.query.dev === 'true') {
+        // In development mode, auto-login as admin
+        console.log('Development mode auto-login activated');
+        
+        // Check if user exists in database first
+        User.findOne({ where: { username: 'admin' } }).then(existingUser => {
+            if (!existingUser) {
+                // Create admin user if it doesn't exist
+                console.log('Creating admin user for development mode');
+                const hashedPassword = require('bcryptjs').hashSync('AdminPassword123!', 10);
+                User.create({
+                    username: 'admin',
+                    password: hashedPassword
+                }).then(newUser => {
+                    initializeUserFiles('admin');
+                    const devToken = jwt.sign(
+                        { username: 'admin' },
+                        process.env.JWT_SECRET || 'your-jwt-secret',
+                        { expiresIn: '24h' }
+                    );
+                    res.cookie('token', devToken, getCookieOptions());
+                    return res.status(200).json({ username: 'admin', devMode: true });
+                }).catch(err => {
+                    console.error('Error creating admin user:', err);
+                    return res.status(500).json({ message: 'Error creating admin user' });
+                });
+            } else {
+                // Admin user exists, create a token
+                const devToken = jwt.sign(
+                    { username: 'admin' },
+                    process.env.JWT_SECRET || 'your-jwt-secret',
+                    { expiresIn: '24h' }
+                );
+                res.cookie('token', devToken, getCookieOptions());
+                return res.status(200).json({ username: 'admin', devMode: true });
+            }
+        }).catch(err => {
+            console.error('Database error checking for admin user:', err);
+            return res.status(500).json({ message: 'Database error' });
+        });
+        return;
+    }
+    
     if (!token) {
         return res.status(401).json({ message: 'No authentication token found' });
     }
@@ -962,8 +1006,10 @@ app.post('/api/search-tags', authenticateToken, async (req, res) => {
             } else {
                 // NSFW mode - use multiple sites with different tag formats
                 urlsToScrape = [
-                    `https://danbooru.donmai.us/posts?tags=${underscoreQuery}&z=2`,
-                    //`https://kusowanka.com/tag/${hyphenQuery}/`,
+                    // `https://danbooru.donmai.us/posts?tags=${underscoreQuery}&z=2`,
+                    // `https://kusowanka.com/tag/${hyphenQuery}/`,
+                    `https://e621.net/posts?tags=${underscoreQuery}`,
+                    `https://r-34.xyz/tag/${underscoreQuery}`,
                 ];
             }
             
@@ -999,6 +1045,7 @@ app.post('/api/search-tags', authenticateToken, async (req, res) => {
         } else {
             urlsToScrape = [
                 `https://kusowanka.com/tag/${hyphenQuery}/`,
+                `https://e621.net/posts?tags=${underscoreQuery}`,
                 `https://r-34.xyz/tag/${underscoreQuery}`,
             ];
         }
@@ -1120,5 +1167,12 @@ app.get('*', (req, res) => {
 // Start server - use the HTTP server instance with Socket.IO
 server.listen(PORT, '0.0.0.0', async () => {
     await initializeDatabase(); // Initialize the database
+    
+    // Add clear indication of development mode in server logs
+    if (process.env.NODE_ENV === 'development') {
+        console.log('\x1b[33m%s\x1b[0m', '🔧 DEVELOPMENT MODE ACTIVE - Auto-login is enabled');
+        console.log('\x1b[33m%s\x1b[0m', '🔑 You will be automatically logged in as admin when visiting the site');
+    }
+    
     console.log(`Server running on port ${PORT} with WebSocket support | Data dir: ${getDataDir()}`);
 });

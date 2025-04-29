@@ -5,6 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "dev": "NODE_ENV=development node server.js",
+    "dev:windows": "set NODE_ENV=development && node server.js",
     "install-all": "npm install && cd my-react-app/server && npm install && cd ../../my-react-app && npm install"
   },
   "dependencies": {

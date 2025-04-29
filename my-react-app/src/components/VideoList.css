@@ -1384,63 +1384,130 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
 }
 
 .tag-category {
-  margin-bottom: 20px;
-  color: var(--text-dark);
+  margin-bottom: 10px;
 }
 
 .tag-category-header {
   font-size: 14px;
   font-weight: 500;
-  margin: 5px 0;
-  color: #e0e0e0;
-  border-bottom: 1px solid #444;
-  padding-bottom: 5px;
+  margin-bottom: 5px;
+  color: #ddd;
+  padding-left: 4px;
+  border-left: 3px solid #4a90e2;
 }
 
 .tags-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 4px;
+}
+
+.tag-container {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin: 2px;
 }
 
 .tag {
-  padding: 5px 10px;
-  border-radius: 15px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: #2a2a2a;
+  color: #ffffff;
   font-size: 12px;
-  display: inline-block;
-  margin-bottom: 5px;
   cursor: pointer;
-  transition: background-color 0.3s;
+  margin-right: 4px;
+  transition: background-color 0.2s;
+  border: 1px solid #3a3a3a;
+  display: inline-block;
 }
 
-.tag.tag-author {
-  background-color: #F9564F;
-  color: var(--text-dark);
+.tag:hover {
+  background-color: #3a3a3a;
 }
-
-.tag.tag-copyright {
-  background-color: #D34AD1;
-  color: var (--text-dark);
-}
-
-.tag.tag-character {
-  background-color: #EBA01E;
-  color: var(--text-dark);
-}
-
-.tag.tag-general {
-  background-color: #2D93AD;
-  color: var(--text-dark);
-}
-
-.tag.tag-author:hover { background-color: #FA7A75; }
-.tag.tag-copyright:hover { background-color: #DB6BD9; }
-.tag.tag-character:hover { background-color: #EFB043; }
-.tag.tag-general:hover { background-color: #3CB0CD; }
 
 .tag.active {
-  background-color: var(--text-light);
+  background-color: #4a90e2;
+  border-color: #3a80d2;
+}
+
+.tag-actions {
+  display: none;
+  position: absolute;
+  right: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 10;
+}
+
+.tag-container:hover .tag-actions {
+  display: flex;
+}
+
+.tag-action {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  cursor: pointer;
+  margin-left: 2px;
+  font-size: 10px;
+  opacity: 0.8;
+  transition: all 0.2s;
+}
+
+.tag-action:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+
+.tag-action-plus {
+  background-color: #2ecc71;
+  color: white;
+}
+
+.tag-action-minus {
+  background-color: #e74c3c;
+  color: white;
+}
+
+.tag-author {
+  background-color: #9b59b6;
+  border-color: #8e44ad;
+}
+
+.tag-copyright {
+  background-color: #3498db;
+  border-color: #2980b9;
+}
+
+.tag-character {
+  background-color: #e67e22;
+  border-color: #d35400;
+}
+
+.tag-general {
+  background-color: #2a2a2a;
+  border-color: #3a3a3a;
+}
+
+/* Ensure tags panel is visible in fullscreen mode */
+.fullscreen .tags-panel {
+  display: block;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background-color: rgba(25, 25, 25, 0.9);
+  border-radius: 8px;
+  padding: 10px;
+  max-width: 300px;
+  max-height: 80vh;
+  overflow-y: auto;
+  z-index: 1001;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
 }
 
 .tag.active:hover {
@@ -1654,6 +1721,43 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
 
 .content-filter-button:active {
   transform: scale(0.97);
+}
+
+/* Blacklist controls */
+.blacklist-controls {
+  display: flex;
+  width: 100%;
+  gap: 8px;
+  align-items: center;
+}
+
+.blacklist-controls input {
+  flex: 1;
+}
+
+.delete-blacklisted-button {
+  padding: 14px 16px;
+  background-color: var(--danger-color);
+  border: none;
+  border-radius: 12px;
+  color: white;
+  cursor: pointer;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.delete-blacklisted-button:hover {
+  background-color: var(--danger-hover);
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+.delete-blacklisted-button i {
+  font-size: 14px;
 }
 
 /* Animations */

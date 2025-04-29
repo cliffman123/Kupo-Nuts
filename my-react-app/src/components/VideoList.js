@@ -612,7 +612,7 @@ const VideoList = () => {
                 headers: headers,
                 ...fetchConfig,
                 body: JSON.stringify({ 
-                    query: tagSearchQuery,
+                    query: query,
                     contentType: contentFilterValue
                 }),
             });
@@ -650,6 +650,16 @@ const VideoList = () => {
         mediaRefs.current.forEach((media, i) => {
             if (media && i !== index && media.tagName === 'VIDEO') media.pause();
         });
+
+        // Play the selected video and unmute it
+        const selectedVideo = mediaRefs.current[index];
+        if (selectedVideo && selectedVideo.tagName === 'VIDEO') {
+            selectedVideo.muted = false;
+            selectedVideo.volume = globalVolume;
+            selectedVideo.play().catch(err => {
+                console.log('Autoplay prevented:', err);
+            });
+        }
         const mediaContainer = document.getElementById('media-container');
         if (mediaContainer) {
             mediaContainer.classList.add('fullscreen-active');
@@ -664,9 +674,18 @@ const VideoList = () => {
     const handleMediaClose = () => {
         setFullscreenMedia(null);
         setIsClickable(false); // Disable clicking
+       
+        // Resume playing all videos in the gallery view, but keep them muted
         mediaRefs.current.forEach(media => {
-            if (media && media.tagName === 'VIDEO') media.pause();
+            if (media && media.tagName === 'VIDEO') {
+                media.muted = true;
+                media.volume = globalVolume;
+                media.play().catch(err => {
+                    console.log('Autoplay prevented:', err);
+                });
+            }
         });
+
         const mediaContainer = document.getElementById('media-container');
         if (mediaContainer) {
             mediaContainer.classList.remove('fullscreen-active');
@@ -778,11 +797,11 @@ const VideoList = () => {
     useEffect(() => {
         if (autoScroll && fullscreenMedia === null) {
             const intervalId = setInterval(() => {
-                window.scrollBy({ top: 3, behavior: 'smooth' });
+                window.scrollBy({ top: scrollSpeed, behavior: 'smooth' });
             }, 1);
             return () => clearInterval(intervalId);
         }
-    }, [autoScroll, fullscreenMedia]);
+    }, [autoScroll, fullscreenMedia, scrollSpeed]);
 
     useEffect(() => {
         setRandomSeed(Date.now());
@@ -1028,7 +1047,7 @@ const VideoList = () => {
 
     const getScrollSpeedFromCookie = () => {
         const match = document.cookie.match(/preferred_scroll_speed=([^;]+)/);
-        return match ? parseInt(match[1], 10) : 3;
+        return match ? parseInt(match[1], 20) : 3;
     };
 
     const saveVolumePreference = (volume) => {
@@ -1059,6 +1078,16 @@ const VideoList = () => {
         return match ? match[1] : 'sfw';
     };
 
+    // Add new functions for tag blacklist preference
+    const saveTagBlacklistPreference = (blacklist) => {
+        document.cookie = `tag_blacklist=${encodeURIComponent(blacklist)}; max-age=31536000; path=/`;
+    };
+
+    const getTagBlacklistFromCookie = () => {
+        const match = document.cookie.match(/tag_blacklist=([^;]+)/);
+        return match ? decodeURIComponent(match[1]) : '';
+    };
+
     // Add new functions for auto scroll preference
     const saveAutoScrollPreference = (autoScroll) => {
         document.cookie = `auto_scroll=${autoScroll ? '1' : '0'}; max-age=31536000; path=/`;
@@ -1082,7 +1111,16 @@ const VideoList = () => {
 
     const checkLoginStatus = async () => {
         try {
-            const response = await fetch(`${API_URL}/api/verify-auth`, {
+            // Detect development environment by checking the URL
+            const isDevelopment = window.location.hostname === 'localhost' || 
+                                 window.location.hostname === '127.0.0.1';
+            
+            // Add dev=true query parameter for dev mode auto-login
+            const authUrl = isDevelopment ? 
+                `${API_URL}/api/verify-auth?dev=true` : 
+                `${API_URL}/api/verify-auth`;
+            
+            const response = await fetch(authUrl, {
                 ...fetchConfig,
                 cache: 'no-cache'
             });
@@ -1091,6 +1129,11 @@ const VideoList = () => {
                 const userData = await response.json();
                 setIsLoggedIn(true);
                 setUsername(userData.username || '');
+                
+                // Show a notification when auto-logged in through dev mode
+                if (isDevelopment && userData.devMode) {
+                    showNotification('Auto-logged in as admin in development mode', 'success');
+                }
                 
                 // Get user preferences after confirming login
                 const savedFilter = getFilterFromCookie();
@@ -1110,6 +1153,7 @@ const VideoList = () => {
             setShowDefaultLinks(getShowDefaultLinksFromCookie());
             setContentFilter(getContentFilterFromCookie());
             setAutoScroll(getAutoScrollFromCookie());
+            setTagBlacklist(getTagBlacklistFromCookie());
 
         } catch (error) {
             console.error('Error checking login status:', error);
@@ -1120,6 +1164,7 @@ const VideoList = () => {
             setScrollSpeed(getScrollSpeedFromCookie());
             setContentFilter(getContentFilterFromCookie());
             setAutoScroll(getAutoScrollFromCookie());
+            setTagBlacklist(getTagBlacklistFromCookie());
 
             console.log('Error during login check, loading local storage content');
         }
@@ -1143,6 +1188,11 @@ const VideoList = () => {
         setGlobalVolume(savedVolume);
         // Initialize the slider fill on component mount
         setTimeout(() => updateVolumeSliderFill(savedVolume), 100);
+    }, []);
+
+    useEffect(() => {
+        const savedTagBlacklist = getTagBlacklistFromCookie();
+        setTagBlacklist(savedTagBlacklist);
     }, []);
 
     useEffect(() => {
@@ -1375,8 +1425,8 @@ const VideoList = () => {
             // If clicking the same tag again, clear the filter
             setTagFilter(null);
         } else {
-            // Set the new tag filter
-            const query = searchQuery.trim();
+            // Set the new tag filter (replacing any existing filter)
+            const query = tag; // Use the tag directly
             setTagSearchQuery(query);
             setTagFilter(query);
             handleTagSearch(query);
@@ -1390,6 +1440,26 @@ const VideoList = () => {
         // Reset to page 1 when changing filters
         setCurrentPage(1);
         setMediaUrls([]);
+    };
+
+    // Handle adding tag to current filter
+    const handleAddTagToFilter = (tag, e) => {
+        e.stopPropagation(); // Prevent triggering the media click
+        
+        if (!tagFilter) {
+            // If no current filter, just set this tag
+            handleTagClick(tag, e);
+        } else if (!tagFilter.includes(tag)) {
+            // Only add if tag isn't already in filter
+            const combinedFilter = `${tagFilter} + ${tag}`;
+            setTagSearchQuery(combinedFilter);
+            setTagFilter(combinedFilter);
+            handleTagSearch(combinedFilter);
+            
+            // Reset to page 1 when changing filters
+            setCurrentPage(1);
+            setMediaUrls([]);
+        }
     };
 
     // Add a component for the tags panel that supports categorized tags
@@ -1415,6 +1485,23 @@ const VideoList = () => {
             { key: 'general', label: 'General' }
         ];
         
+        const addTagToBlacklist = (tag, e) => {
+            e.stopPropagation(); // Prevent triggering the media click
+            
+            // Get current blacklist and add the new tag
+            let currentBlacklist = tagBlacklist ? tagBlacklist.split(',').map(t => t.trim()) : [];
+            // Make sure we don't add duplicates
+            if (!currentBlacklist.includes(tag)) {
+                currentBlacklist.push(tag);
+                const newBlacklist = currentBlacklist.join(', ');
+                setTagBlacklist(newBlacklist);
+                saveTagBlacklistPreference(newBlacklist);
+                showNotification(`Added "${tag}" to blacklist`, 'info');
+            } else {
+                showNotification(`"${tag}" is already in blacklist`, 'info');
+            }
+        };
+        
         return (
             <div className="tags-panel">
                 <div className="tags-header">
@@ -1430,13 +1517,33 @@ const VideoList = () => {
                             <h3 className="tag-category-header">{category.label}</h3>
                             <div className="tags-list">
                                 {categoryTags.map((tag, idx) => (
-                                    <span 
+                                    <div 
                                         key={`${category.key}-${idx}`}
-                                        className={`tag tag-${category.key} ${tagFilter === tag ? 'active' : ''}`}
-                                        onClick={(e) => handleTagClick(tag, e)}
+                                        className={`tag-container`}
                                     >
-                                        {tag}
-                                    </span>
+                                        <span 
+                                            className={`tag tag-${category.key} ${tagFilter === tag ? 'active' : ''}`}
+                                            onClick={(e) => handleTagClick(tag, e)}
+                                        >
+                                            {tag}
+                                        </span>
+                                        <div className="tag-actions">
+                                            <button 
+                                                className="tag-action tag-action-plus" 
+                                                onClick={(e) => handleAddTagToFilter(tag, e)}
+                                                title="Filter by this tag"
+                                            >
+                                                <i className="fas fa-plus"></i>
+                                            </button>
+                                            <button 
+                                                className="tag-action tag-action-minus" 
+                                                onClick={(e) => addTagToBlacklist(tag, e)}
+                                                title="Add to blacklist"
+                                            >
+                                                <i className="fas fa-minus"></i>
+                                            </button>
+                                        </div>
+                                    </div>
                                 ))}
                             </div>
                         </div>
@@ -1680,7 +1787,37 @@ const VideoList = () => {
     };
 
     const handleTagBlacklistChange = (event) => {
-        setTagBlacklist(event.target.value);
+        const newBlacklist = event.target.value;
+        setTagBlacklist(newBlacklist);
+        saveTagBlacklistPreference(newBlacklist);
+    };
+
+    const handleDeleteBlacklisted = () => {
+        try {
+            const blacklist = tagBlacklist.split(',').map(tag => tag.trim().toLowerCase());
+            const filteredMedia = mediaUrls.filter(media => {
+                const tags = media[2];
+                if (!tags) return true;
+                const allTags = [];
+                if (Array.isArray(tags)) {
+                    tags.forEach(tag => allTags.push(tag.toLowerCase()));
+                } else {
+                    Object.values(tags).forEach(categoryTags => {
+                        if (Array.isArray(categoryTags)) {
+                            categoryTags.forEach(tag => allTags.push(tag.toLowerCase()));
+                        }
+                    });
+                }
+                return !blacklist.some(blacklistedTag =>
+                    allTags.some(tag => tag.includes(blacklistedTag))
+                );
+            });
+            setMediaUrls(filteredMedia);
+            showNotification('Deleted all media containing blacklisted tags', 'success');
+        } catch (error) {
+            console.error('Error deleting blacklisted media:', error);
+            showNotification('Failed to delete blacklisted media', 'error');
+        }
     };
 
     const handleUnifiedSearch = () => {
@@ -1703,13 +1840,101 @@ const VideoList = () => {
             // It's a tag, trigger tag search
             const query = searchQuery.trim();
             setTagSearchQuery(query);
-            setTagFilter(query);
             handleTagSearch(query);
         }
         
         // Clear the search input
         setSearchQuery('');
     };
+
+    // Add a new ref to store video observers
+    const videoObservers = useRef({});
+
+    // Create a function to handle visibility changes for videos
+    const handleVideoVisibilityChange = useCallback((entries, observer) => {
+        entries.forEach(entry => {
+            const video = entry.target;
+            
+            // If video is intersecting (visible in viewport)
+            if (entry.isIntersecting) {
+                // Only play if not in fullscreen mode and autoplay is enabled
+                if (fullscreenMedia === null && video.tagName === 'VIDEO') {
+                    video.play().catch(err => {
+                        // Silent catch for autoplay restrictions
+                        console.log('Autoplay prevented:', err);
+                    });
+                }
+            } else {
+                // If video is not visible and not the fullscreen video, pause it
+                if (fullscreenMedia === null && video.tagName === 'VIDEO') {
+                    video.pause();
+                }
+            }
+        });
+    }, [fullscreenMedia]);
+
+    // Function to setup observers for all video elements
+    const setupVideoObservers = useCallback(() => {
+        // Clean up any existing observers
+        Object.values(videoObservers.current).forEach(observer => {
+            if (observer) observer.disconnect();
+        });
+        
+        // Clear the observers object
+        videoObservers.current = {};
+        
+        // Setup new observers for all video elements
+        Object.entries(mediaRefs.current).forEach(([index, ref]) => {
+            if (ref && ref.tagName === 'VIDEO') {
+                const observer = new IntersectionObserver(
+                    handleVideoVisibilityChange, 
+                    {
+                        root: null, // viewport
+                        threshold: 0.2 // 20% visibility triggers callback
+                    }
+                );
+                
+                observer.observe(ref);
+                videoObservers.current[index] = observer;
+            }
+        });
+    }, [handleVideoVisibilityChange]);
+
+    // Setup video observers when media refs change
+    useEffect(() => {
+        // Small delay to ensure refs are populated
+        const timer = setTimeout(() => {
+            setupVideoObservers();
+        }, 500);
+        
+        return () => {
+            clearTimeout(timer);
+            // Clean up observers on unmount
+            Object.values(videoObservers.current).forEach(observer => {
+                if (observer) observer.disconnect();
+            });
+        };
+    }, [mediaUrls, setupVideoObservers]);
+
+    // Refresh video observers after page changes
+    useEffect(() => {
+        if (!loading) {
+            const timer = setTimeout(() => {
+                setupVideoObservers();
+            }, 1000);
+            
+            return () => clearTimeout(timer);
+        }
+    }, [currentPage, loading, setupVideoObservers]);
+
+    // Refresh video observers when fullscreen changes
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setupVideoObservers();
+        }, 500);
+        
+        return () => clearTimeout(timer);
+    }, [fullscreenMedia, setupVideoObservers]);
 
     return (
         <div>
@@ -1848,6 +2073,7 @@ const VideoList = () => {
                                             ref={el => mediaRefs.current[index] = el}
                                             src={firstVideoLink}
                                             controls
+                                            autoPlay
                                             muted={fullscreenMedia !== index}
                                             volume={globalVolume}
                                             loop
@@ -2196,13 +2422,22 @@ const VideoList = () => {
 
                                 <div className="settings-item">
                                     <label htmlFor="tag-blacklist">Tag Blacklist (comma-separated):</label>
-                                    <input
-                                        type="text"
-                                        id="tag-blacklist"
-                                        value={tagBlacklist}
-                                        onChange={handleTagBlacklistChange}
-                                        placeholder="Enter tags to blacklist"
-                                    />
+                                    <div className="blacklist-controls">
+                                        <input
+                                            type="text"
+                                            id="tag-blacklist"
+                                            value={tagBlacklist}
+                                            onChange={handleTagBlacklistChange}
+                                            placeholder="Enter tags to blacklist"
+                                        />
+                                        <button 
+                                            className="delete-blacklisted-button"
+                                            onClick={handleDeleteBlacklisted}
+                                            title="Delete all media containing blacklisted tags"
+                                        >
+                                            <i className="fas fa-trash-alt"></i> Delete All
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
