@@ -1006,10 +1006,10 @@ app.post('/api/search-tags', authenticateToken, async (req, res) => {
             } else {
                 // NSFW mode - use multiple sites with different tag formats
                 urlsToScrape = [
-                    // `https://danbooru.donmai.us/posts?tags=${underscoreQuery}&z=2`,
-                    // `https://kusowanka.com/tag/${hyphenQuery}/`,
-                    `https://e621.net/posts?tags=${underscoreQuery}`,
-                    `https://r-34.xyz/tag/${underscoreQuery}`,
+                    `https://danbooru.donmai.us/posts?tags=${underscoreQuery}&z=2`,
+                    // // `https://kusowanka.com/tag/${hyphenQuery}/`,
+                    // `https://e621.net/posts?tags=${underscoreQuery}`,
+                    // `https://r-34.xyz/tag/${underscoreQuery}`,
                 ];
             }
             
@@ -1045,8 +1045,8 @@ app.post('/api/search-tags', authenticateToken, async (req, res) => {
         } else {
             urlsToScrape = [
                 `https://kusowanka.com/tag/${hyphenQuery}/`,
-                `https://e621.net/posts?tags=${underscoreQuery}`,
-                `https://r-34.xyz/tag/${underscoreQuery}`,
+                // `https://e621.net/posts?tags=${underscoreQuery}`,
+                // `https://r-34.xyz/tag/${underscoreQuery}`,
             ];
         }
         
