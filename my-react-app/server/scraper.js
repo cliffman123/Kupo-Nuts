@@ -17,14 +17,15 @@ const CONFIG = {
   LINKS_PATH: process.env.LINKS_PATH || path.join(__dirname, '../../build/links.json'),
   DATA_DIR: process.env.DATA_DIR || path.join(__dirname, '../../data'),
   UBLOCK_PATH: process.env.UBLOCK_PATH || 'C:\\Users\\cliff\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Extensions\\odfafepnkmbhccpbejgmiehpchacaeak\\1.62.0_0',
+  COOKIES_PATH: process.env.COOKIES_PATH || path.join(__dirname, './cookies.json'),
   
   // URLs
   FEED_URL: process.env.FEED_URL || 'https://www.pixiv.net/discovery?mode=r18',
   PIXIV_LOGIN_URL: process.env.PIXIV_LOGIN_URL || 'https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2Fen%2F&lang=en&source=pc&view_type=page',
   
   // Credentials - Always use environment variables for sensitive data
-  PIXIV_USERNAME: process.env.PIXIV_USERNAME,
-  PIXIV_PASSWORD: process.env.PIXIV_PASSWORD,
+  PIXIV_USERNAME: process.env.PIXIV_USERNAME || 'cliffman123@gmail.com',
+  PIXIV_PASSWORD: process.env.PIXIV_PASSWORD || '$piralKnights7',
   
   // Scraping settings
   PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '3'), // Number of pages to scrape
@@ -42,6 +43,13 @@ const PIXIV_LINKS_PATH = path.resolve(CONFIG.DATA_DIR, 'pixivLinks.json');
 
 // Domain-specific selectors
 const WEBSITE_SELECTORS = {
+    'erome.com': {
+        nextPage: ['#page > ul > li:nth-child(13) > a',],
+        media: ['[id^="album_"]'],  // Match any ID starting with "album_" and common media elements
+        tag: [
+        ],
+        links: 'a[href*="/a/"]'  // Match links containing "/a/" which will find both relative and absolute URLs
+    },
     'e621.net': {
     nextPage: ['#paginator-next'],
     media: ['body > div#page > div#c-posts > div#a-show > div.post-index > div.content > div#image-and-nav > section#image-container > #image'],
@@ -118,6 +126,19 @@ const WEBSITE_SELECTORS = {
     ],
     links: 'a[href*="/posts/"]'
   },
+  'pixiv.net': {
+    nextPage: [
+        '#__next > div > div:nth-child(2) > div.sc-1e6e6d57-0.gQkIQm.__top_side_menu_body > div.sc-3d8ed48f-1 > div > section > div:nth-child(2) > div.sc-afb2b593-4.fJdNho > div.sc-b3f71196-1.iUnFZF > nav > a:nth-child(9)',
+      ],
+    media: ['#__next > div > div:nth-child(2) > div.sc-1e6e6d57-0.gQkIQm.__top_side_menu_body > div.sc-3d8ed48f-1 > div > section > div:nth-child(2) > div.sc-afb2b593-4.fJdNho > div.sc-b3f71196-1.iUnFZF > nav > a:nth-child(9)'],
+    tag: [
+        'body > div.main_content > div.sidebar > ul.artists_list > li > a',
+        'body > div.main_content > div.sidebar > ul.parodies_list > li > a',
+        'body > div.main_content > div.sidebar > ul.characters_list > li > a',
+        'body > div.main_content > div.sidebar > ul.tags_list > li > a'
+    ],
+    links:  'a[href*="/artworks/"]'
+  },
   'kusowanka': {
     nextPage: [
         'body > div.main_content > div.overview_thumbs > ul > li:last-child > a',
@@ -171,13 +192,27 @@ const monitorAndCloseAdTabs = async (browser, ignoredPage = null) => {
             // Skip the main page we're working with
             if (ignoredPage && page === ignoredPage) continue;
             
-            const url = page.url();
-            // Skip about:blank pages
-            if (!url || url === 'about:blank') continue;
+            // Check if page is still valid and connected to browser
+            if (!page || page.isClosed?.()) continue;
             
-            if (!isAllowedUrl(url) && !page.isBusy) {  // Add a busy flag system
-                console.log(`Closing ad tab with URL: ${url}`);
-                await page.close().catch(e => console.error('Error closing ad tab:', e.message));
+            // Try to get URL and skip if it fails (indicates a disconnected page)
+            let url;
+            try {
+                url = await page.url();
+                
+                // Skip about:blank pages
+                if (!url || url === 'about:blank') continue;
+                
+                if (!isAllowedUrl(url) && !page.isBusy) {
+                    console.log(`Closing ad tab with URL: ${url}`);
+                    // Add additional safety check before closing
+                    if (!page.isClosed?.()) {
+                        await page.close().catch(e => console.error('Error closing ad tab:', e.message));
+                    }
+                }
+            } catch (urlError) {
+                // If we can't get the URL, the page is likely already closed or disconnected
+                console.log("Skipping tab - unable to get URL");
             }
         }
     } catch (error) {
@@ -306,46 +341,93 @@ const readExistingLinks = (username = null) => {
     return { links, linkSet };
 };
 
+// Helper function to save cookies to file
+const saveCookies = async (page) => {
+  try {
+    const cookies = await page.cookies();
+    fs.writeFileSync(CONFIG.COOKIES_PATH, JSON.stringify(cookies, null, 2));
+    console.log('Cookies saved successfully to', CONFIG.COOKIES_PATH);
+    return true;
+  } catch (error) {
+    console.error('Error saving cookies:', error);
+    return false;
+  }
+};
+
+// Helper function to load cookies from file
+const loadCookies = async (page) => {
+  try {
+    if (fs.existsSync(CONFIG.COOKIES_PATH)) {
+      const cookiesString = fs.readFileSync(CONFIG.COOKIES_PATH, 'utf8');
+      const cookies = JSON.parse(cookiesString);
+      
+      if (cookies.length > 0) {
+        for (const cookie of cookies) {
+          await page.setCookie(cookie);
+        }
+        console.log('Cookies loaded successfully from', CONFIG.COOKIES_PATH);
+        return true;
+      }
+    }
+    console.log('No cookies file found or cookies are empty');
+    return false;
+  } catch (error) {
+    console.error('Error loading cookies:', error);
+    return false;
+  }
+};
+
 const loginToPixiv = async (page, providedLink) => {
-    await page.goto(CONFIG.PIXIV_LOGIN_URL, {
-        timeout: 180000,
-        waitUntil: 'networkidle2'
-    });
+  // First try to load cookies and check if we're already logged in
+  await loadCookies(page);
+  
+  // Try to navigate to the page to check if cookies worked
+  await page.goto(CONFIG.PIXIV_LOGIN_URL, {
+    timeout: 180000,
+    waitUntil: 'networkidle2'
+  });
 
-    if (page.url().includes('https://www.pixiv.net/en/')) {
-        console.log('Already logged in to Pixiv.');
-        return;
-    }
+  // Check if we're already logged in after applying cookies
+  if (page.url().includes('https://www.pixiv.net/en/')) {
+    console.log('Already logged in to Pixiv using saved cookies.');
+    return;
+  }
 
-    // Wait for username field to be visible before typing
-    await page.waitForSelector('input[type="text"]', { visible: true });
-    await page.type('input[type="text"]', CONFIG.PIXIV_USERNAME);
-    
-    // Wait for password field to be visible
-    await page.waitForSelector('input[type="password"]', { visible: true });
-    await page.type('input[type="password"]', CONFIG.PIXIV_PASSWORD);
-    
-    // Wait for login button and click it
-    const loginButtonSelector = '#app-mount-point > div > div > div.sc-fvq2qx-4.csnYja > div.sc-2o1uwj-0.bOKfsa > form > button.charcoal-button.sc-2o1uwj-10.ldVSLT';
-    await page.waitForSelector(loginButtonSelector, { visible: true });
-    await page.click(loginButtonSelector);
-    
-    console.log('Logging in to Pixiv...');
+  console.log('Cookies expired or not found. Proceeding with manual login...');
 
-    // Wait for navigation to complete after login
-    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
-    
-    if (page.url().includes('https://www.pixiv.net/en/')) {
-        console.log('Successfully logged in to Pixiv.');
-        return;
-    } else {
-        console.log('Waiting for complete login...');
-        // More robust wait for successful login
-        await page.waitForFunction(() => {
-            return window.location.href.includes('https://www.pixiv.net/en/');
-        }, { timeout: 60000 });
-        console.log('Login completed successfully');
-    }
+  // Wait for username field to be visible before typing
+  await page.waitForSelector('input[type="text"]', { visible: true });
+  await page.type('input[type="text"]', CONFIG.PIXIV_USERNAME);
+  
+  // Wait for password field to be visible
+  await page.waitForSelector('input[type="password"]', { visible: true });
+  await page.type('input[type="password"]', CONFIG.PIXIV_PASSWORD);
+  
+  // Wait for login button and click it
+  const loginButtonSelector = '#app-mount-point > div > div > div.sc-fvq2qx-4.bntRDI > div.sc-2oz7me-0.iGLGot > form > button.charcoal-button.sc-2o1uwj-10.divuub';
+  await page.waitForSelector(loginButtonSelector, { visible: true });
+  await page.click(loginButtonSelector);
+  
+  console.log('Logging in to Pixiv...');
+
+  // Wait for navigation to complete after login
+  await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
+  
+  if (page.url().includes('https://www.pixiv.net/en/')) {
+    console.log('Successfully logged in to Pixiv.');
+    // Save cookies after successful login
+    await saveCookies(page);
+    return;
+  } else {
+    console.log('Waiting for complete login...');
+    // More robust wait for successful login
+    await page.waitForFunction(() => {
+      return window.location.href.includes('https://www.pixiv.net/en/');
+    }, { timeout: 60000 });
+    console.log('Login completed successfully');
+    // Save cookies after successful login
+    await saveCookies(page);
+  }
 };
 
 const navigateToFeed = async (page, providedLink) => {
@@ -382,6 +464,12 @@ const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLi
         const buttonSelector = '#guest-warning-accept';
         await page.waitForSelector(buttonSelector, { timeout: 5000 });
         await page.click(buttonSelector);
+    }
+    else if (providedLink.includes('erome.com')) {
+        const buttonSelector = '#home-box > div.enter';
+        await page.waitForSelector(buttonSelector, { timeout: 5000 });
+        await page.click(buttonSelector);
+        await page.goto(providedLink, { waitUntil: 'networkidle2' });
     }
 
     totalAdded = await collectAndScrapeLinks(page, postLinksQueue, existingLinks, providedLink, username, progressCallback, existingLinkSet, skipSave);
@@ -604,7 +692,7 @@ const processLinkWithRetry = async (browser, link, existingLinkSet, mediaSelecto
 const extractMediaData = async (page, link, mediaSelectors) => {
     // Initialize result object with default values
     const result = {
-        mediaUrl: null,
+        mediaUrls: [], // Changed from mediaUrl to mediaUrls array
         tags: {
             author: [],
             copyright: [],
@@ -621,7 +709,10 @@ const extractMediaData = async (page, link, mediaSelectors) => {
     if (link.includes('kemono.su')) {
         const pageContent = await page.evaluate(() => document.body.innerText);
         const mediaUrls = pageContent.match(/https:\/\/n\d\.kemono\.su\/data\/[a-f0-9]{2}\/[a-f0-9]{2}\/[a-f0-9]{32}\.(png|jpg|gif|webm|webp)\?f=\S+/g);
-        result.mediaUrl = mediaUrls ? mediaUrls.find(url => url.includes('kemono') && !url.includes('/logo.png')) : null;
+        // Store all found kemono.su URLs that aren't logos
+        if (mediaUrls) {
+            result.mediaUrls = mediaUrls.filter(url => url.includes('kemono') && !url.includes('/logo.png'));
+        }
         
         // Also try to extract tags for Kemono
         try {
@@ -644,19 +735,24 @@ const extractMediaData = async (page, link, mediaSelectors) => {
             const siteSelectors = getSiteSelectors(link);
             const combinedSelectors = [...(siteSelectors.media || []), ...mediaSelectors];
             
-            // Extract media URL
-            result.mediaUrl = await page.evaluate((selectors) => {
-                // First try the specified selectors
+            // Extract all media URLs (changed to collect all matches instead of just the first one)
+            result.mediaUrls = await page.evaluate((selectors) => {
+                let urls = [];
+                
+                // Try all specified selectors
                 for (const selector of selectors) {
                     const elements = document.querySelectorAll(selector);
                     for (const element of elements) {
                         const src = element.src || element.currentSrc;
                         if (src && /\.(mp4|png|jpg|jpeg|gif|webm|webp)$/i.test(src) && !src.includes('/logo.png')) {
-                            return src;
+                            // Add to the array instead of returning immediately
+                            urls.push(src);
                         }
                     }
                 }
-                return null;
+                
+                // Remove duplicates before returning
+                return [...new Set(urls)];
             }, combinedSelectors);
             
             // Extract tags if tag selectors exist for this site
@@ -690,132 +786,115 @@ const extractMediaData = async (page, link, mediaSelectors) => {
     return result;
 };
 
-// Update processPixivLink to extract and include tags
-const processPixivLink = async (page, link, feedPageUrl, username, progressCallback, skipSave = false) => {
+// Updated processPixivLink function
+const processPixivLink = async (browser, link, feedPageUrl, username, progressCallback, skipSave = false) => {
     try {
-        const artworkId = link.match(/\/artworks\/(\d+)/)[1];
-        const apiUrl = `https://www.phixiv.net/api/info?id=${artworkId}&language=en`;
-        await page.goto(apiUrl, { waitUntil: 'networkidle2' });
+        // Create a new page for this process
+        const page = await browser.newPage();
+        
+        try {
+            const artworkId = link.match(/\/artworks\/(\d+)/)[1];
+            const apiUrl = `https://www.phixiv.net/api/info?id=${artworkId}&language=en`;
+            await page.goto(apiUrl, { waitUntil: 'networkidle2' });
 
-        const mediaData = await page.evaluate(() => document.body.innerText);
-        if (mediaData) {
-            const imageUrls = mediaData.match(/https:\/\/[^"]+\.(jpg|jpeg|png|gif|webp)/g) || [];
-            
-            // Initialize categorized tags
-            let tags = {
-                author: [],
-                copyright: [],
-                character: [],
-                general: []
+            // Initialize result object with default values similar to processLink function
+            const result = {
+                postLink: link,
+                videoLinks: [],
+                tags: {
+                    author: [],
+                    general: []
+                }
             };
-            
-            try {
-                // Try to parse JSON response to extract tags
-                let jsonData;
-                try {
-                    jsonData = JSON.parse(mediaData);
-                } catch (e) {
-                    // If not valid JSON, use regex to extract tags
-                    // For now, all extracted tags go to 'general' since we can't categorize them
-                    const tagMatches = mediaData.match(/"tag":\s*"([^"]+)"/g);
-                    if (tagMatches) {
-                        tags.general = tagMatches.map(match => {
-                            const tagMatch = match.match(/"tag":\s*"([^"]+)"/);
-                            return tagMatch ? tagMatch[1] : '';
-                        }).filter(tag => tag);
-                    }
-                    
-                    // Try also extracting tags from tag sections
-                    const tagSectionMatches = mediaData.match(/"tags":\s*\[(.*?)\]/g);
-                    if (tagSectionMatches) {
-                        tagSectionMatches.forEach(section => {
-                            const tagItems = section.match(/"([^"]+)"/g);
-                            if (tagItems) {
-                                tags.general = [...tags.general, ...tagItems.map(t => t.replace(/"/g, ''))];
-                            }
-                        });
-                    }
-                }
-                
-                // If JSON parsing successful, try to extract and categorize tags
-                if (jsonData) {
-                    // Try to find categorized tags first
-                    if (jsonData.tags) {
-                        // For Pixiv, we can often detect tag categories by prefix or context
-                        const extractedTags = Array.isArray(jsonData.tags) ? jsonData.tags : [jsonData.tags];
-                        
-                        // Attempt to categorize based on common naming patterns
-                        extractedTags.forEach(tag => {
-                            if (!tag) return;
-                            
-                            // Simple heuristic categorization based on common tag patterns
-                            if (tag.includes('creator:') || tag.includes('artist:')) {
-                                tags.author.push(tag.replace(/creator:|artist:/i, '').trim());
-                            } else if (tag.includes('copyright:') || tag.includes('series:')) {
-                                tags.copyright.push(tag.replace(/copyright:|series:/i, '').trim());
-                            } else if (tag.includes('character:')) {
-                                tags.character.push(tag.replace(/character:/i, '').trim());
-                            } else {
-                                tags.general.push(tag);
-                            }
-                        });
-                    } else if (jsonData.data && jsonData.data.tags) {
-                        // Similar categorization for data.tags
-                        const extractedTags = Array.isArray(jsonData.data.tags) ? jsonData.data.tags : [jsonData.data.tags];
-                        
-                        // Default to general category
-                        tags.general = extractedTags.filter(tag => tag);
-                    }
-                }
-                
-                // Clean up empty categories
-                Object.keys(tags).forEach(category => {
-                    tags[category] = [...new Set(tags[category])]; // Remove duplicates
-                    if (tags[category].length === 0) {
-                        delete tags[category]; // Remove empty categories
-                    }
-                });
-                
-                const totalTags = Object.values(tags).flat().length;
-                if (totalTags > 0) {
-                    console.log(`Extracted ${totalTags} categorized tags from Pixiv artwork ${artworkId}`);
-                    
-                    // Save tags to domain-specific file
-                    saveTagsByDomain(tags, 'pixiv.net', username);
-                }
-            } catch (e) {
-                console.log('Error extracting Pixiv tags:', e);
-            }
-            
-            if (imageUrls.length > 0) {
-                // Include the extracted tags in the mediaLink
-                const mediaLink = { 
-                    postLink: link, 
-                    videoLinks: imageUrls,
-                    tags: tags 
-                };
-                
-                console.log('Image URLs:', imageUrls);
-                if (Object.values(tags).flat().length > 0) console.log('Tags:', tags);
 
-                // Only save to disk if we're not in skipSave mode
-                const linksAdded = skipSave ? 1 : (feedPageUrl.includes("bookmark_new_illust_r18") || 
-                                 feedPageUrl.includes("illustrations") || 
-                                 feedPageUrl.includes("artworks")
-                    ? saveMediaLinks([mediaLink], username)
-                    : savePixivLinks([mediaLink], username, feedPageUrl));
+            const mediaData = await page.evaluate(() => document.body.innerText);
+            if (mediaData) {
+                // Extract image URLs using regex
+                result.videoLinks = mediaData.match(/https:\/\/[^"]+master[^"]*\.(jpg|jpeg|png|gif|webp)/g) || [];
                 
-                // Call progress callback after saving links
-                if (progressCallback) {
-                    progressCallback(linksAdded);
+                try {
+                    // Extract author name using regex
+                    const authorMatch = mediaData.match(/"author_name"\s*:\s*"([^"]+)"/);
+                    if (authorMatch && authorMatch[1]) {
+                        result.tags.author = [authorMatch[1]];
+                        console.log(`Found author: ${authorMatch[1]}`);
+                    }
+                    
+                    // Extract general tags using the new format
+                    const tagsMatch = mediaData.match(/"tags"\s*:\s*\[(.*?)\]/);
+                    if (tagsMatch && tagsMatch[1]) {
+                        // Extract all quoted strings in the tags array
+                        const tagItems = tagsMatch[1].match(/"([^"]+)"/g);
+                        if (tagItems && tagItems.length > 0) {
+                            // Clean the tags - remove quotes and "#" prefixes for storage
+                            result.tags.general = tagItems.map(tagItem => {
+                                const cleanTag = tagItem.replace(/"/g, '');
+                                // If tag starts with #, remove it but preserve the rest
+                                return cleanTag.startsWith('#') ? cleanTag.substring(1) : cleanTag;
+                            });
+                            console.log(`Found ${result.tags.general.length} general tags`);
+                        }
+                    }
+                    
+                    // Remove empty categories and ensure we have unique tags
+                    Object.keys(result.tags).forEach(category => {
+                        if (result.tags[category]) {
+                            result.tags[category] = [...new Set(result.tags[category])]; // Remove duplicates
+                            if (result.tags[category].length === 0) {
+                                delete result.tags[category]; // Remove empty categories
+                            }
+                        }
+                    });
+                    
+                    const totalTags = Object.values(result.tags).flat().length;
+                    if (totalTags > 0) {
+                        console.log(`Extracted ${totalTags} tags from Pixiv artwork ${artworkId}`);
+                        
+                        // Save tags to domain-specific file
+                        if (!skipSave && username) {
+                            saveTagsByDomain(result.tags, 'pixiv.net', username);
+                        }
+                    }
+                } catch (e) {
+                    console.log('Error extracting Pixiv tags:', e);
                 }
-                return linksAdded;
+                
+                if (result.videoLinks.length > 0) {
+                    const mediaLink = { 
+                        postLink: link, 
+                        videoLinks: result.videoLinks,
+                        tags: result.tags 
+                    };
+
+                    // Only save to disk if we're not in skipSave mode
+                    const linksAdded = skipSave ? 1 : (feedPageUrl.includes("bookmark_new_illust_r18") || 
+                                     feedPageUrl.includes("illustrations") || 
+                                     feedPageUrl.includes("artworks")
+                        ? saveMediaLinks([mediaLink], username)
+                        : savePixivLinks([mediaLink], username, feedPageUrl));
+                    
+                    // Update progress callback to match collectAndScrapeLinks format
+                    if (progressCallback) {
+                        progressCallback(linksAdded, `Processed batch: found ${linksAdded} items total`, false, [mediaLink]);
+                    }
+                    
+                    // Return both the mediaLink and linksAdded count
+                    return { mediaLink, linksAdded };
+                }
+            }
+            return { linksAdded: 0 }; // Return 0 if no links were added
+        } catch (error) {
+            console.error(`Failed to load resource at ${link}:`, error);
+            return { linksAdded: 0 }; // Return 0 on error
+        } finally {
+            // Always close the page when done
+            if (page && !page.isClosed()) {
+                await page.close().catch(e => console.error('Error closing page:', e.message));
             }
         }
-        return 0;
-    } catch (error) {
-        console.error(`Failed to load resource at ${link}:`, error);
-        return 0;
+    } catch (browserError) {
+        console.error(`Browser error processing ${link}:`, browserError);
+        return { linksAdded: 0 };
     }
 };
 
@@ -825,11 +904,6 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
     
     try {
         page = await browser.newPage();
-        
-        // // Setup tab monitor interval specifically for this page processing
-        // tabCleanupInterval = setInterval(() => {
-        //     monitorAndCloseAdTabs(browser, page);
-        // }, 3000); // Check more frequently during single page processing
         
         // Check if the link is from Kemono.su and add the redirect prefix if needed
         const jinaLink = link.includes('kemono.su') ? `https://r.jina.ai/${link}` : link;
@@ -853,7 +927,7 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
             const videoId = link.match(/\/video\/(\d+)/)?.[1];
             if (videoId) {
                 extractedData = {
-                    mediaUrl: `https://rule34video.com/embed/${videoId}`,
+                    mediaUrls: [`https://rule34video.com/embed/${videoId}`],
                     tags: { general: [] } // Initialize with empty tags for videos
                 };
             }
@@ -876,7 +950,7 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
             extractedData = await extractMediaData(page, link, mediaSelectors);
         }
 
-        if (extractedData && extractedData.mediaUrl) {
+        if (extractedData && extractedData.mediaUrls.length > 0) {
             // Make sure we have a properly structured tags object
             const tags = extractedData.tags || { 
                 author: [],
@@ -887,7 +961,7 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
             
             const mediaLink = { 
                 postLink: link, 
-                videoLinks: [extractedData.mediaUrl],
+                videoLinks: extractedData.mediaUrls,
                 tags: tags
             };
             
@@ -1225,6 +1299,7 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
     let feedPageUrl = providedLink || CONFIG.FEED_URL;
     let pageCount = 0;
     let existingLinks = [];
+    let totalAdded = 0;
 
     if (!feedPageUrl.includes("bookmark_new_illust_r18") && !feedPageUrl.includes("illustrations") || feedPageUrl.includes("artworks")) {
         clearPixivLinks(); // Clear pixivLinks at the beginning
@@ -1239,8 +1314,6 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
     const { linkSet: existingLinkSet } = skipSave ? { linkSet: new Set() } : readExistingLinks(username);
     console.log(`Loaded ${existingLinkSet.size} existing links for duplicate checking`);
 
-    let totalAdded = 0;
-
     // Setup tab cleanup interval
     let tabCleanupInterval;
     
@@ -1254,14 +1327,19 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
 
         while (pageCount < CONFIG.PAGE_TARGET) {
             await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
-
             
+            // Progress update for each page
+            if (progressCallback) {
+                progressCallback(totalAdded, `Scraping Pixiv page ${pageCount + 1}...`, false);
+            }
+            
+            // Scroll to ensure all content is loaded
             await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
             await new Promise(resolve => setTimeout(resolve, 1000)); //Wait for 1 second
             await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
             await new Promise(resolve => setTimeout(resolve, 1000)); //Wait for 1 second
             await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-            await new Promise(resolve => setTimeout(resolve, 3000)); //Wait for 3 second
+            await new Promise(resolve => setTimeout(resolve, 3000)); //Wait for 3 seconds
 
             // Use the pixiv-specific link selector
             const pixivLinkSelector = WEBSITE_SELECTORS['pixiv.net'].links;
@@ -1286,35 +1364,99 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
                 console.log('Nothing New Found, moving to the next saved link.');
                 break;
             }
+
+            // PARALLEL PROCESSING - Process links in batches with improved resource management
+            const batchSize = CONFIG.RATE_LIMIT.maxConcurrent;
             while (postLinksQueue.length > 0) {
-                const link = postLinksQueue.shift();
-                // Check if the link already exists in links.json
-                if (!existingLinks.some(existingLink => existingLink.postLink === link)) {
-                    const newLinks = await processPixivLink(page, link, feedPageUrl, skipSave ? null : username, progressCallback);
-                    totalAdded += newLinks;
-                    // Call progress callback after each link is processed
-                    if (progressCallback) {
-                        progressCallback(totalAdded);
-                    }
-                } else {
-                    console.log(`Skipping duplicate link: ${link}`);
+                // Update progress with batch information
+                if (progressCallback) {
+                    progressCallback(totalAdded, `Processing Pixiv batch: ${Math.min(batchSize, postLinksQueue.length)} items, ${totalAdded} found so far`, false);
                 }
+                
+                // Reduce batch size if we're running low on links to avoid wasting resources
+                const currentBatchSize = Math.min(batchSize, postLinksQueue.length);
+                const batch = postLinksQueue.splice(0, currentBatchSize);
+                
+                // Process the batch in parallel
+                const results = await Promise.allSettled(
+                    batch.map(link => {
+                        // Check if link already exists for efficiency
+                        if (pixivExistingSet.has(link) || existingLinkSet.has(link)) {
+                            return Promise.resolve({ status: 'fulfilled', value: 0 });
+                        }
+                        
+                        return processPixivLink(
+                            page.browser(), 
+                            link, 
+                            feedPageUrl, 
+                            skipSave ? null : username, 
+                            null, // Don't pass progress callback here
+                            skipSave // Pass skipSave flag
+                        );
+                    })
+                );
+                
+                // Collect newly added media items
+                const newMediaItems = [];
+                let batchAdded = 0;
+                
+                // Process results
+                for (const result of results) {
+                    if (result.status === 'fulfilled' && result.value && result.value.mediaLink) {
+                        existingLinkSet.add(result.value.mediaLink.postLink);
+                        pixivExistingSet.add(result.value.mediaLink.postLink);
+                        existingLinks.push(result.value.mediaLink);
+                        newMediaItems.push(result.value.mediaLink);
+                        batchAdded += result.value.linksAdded;
+                    }
+                }
+                
+                totalAdded += batchAdded;
+                
+                // Call progress callback with batch items and total
+                if (progressCallback && newMediaItems.length > 0) {
+                    progressCallback(totalAdded, `Processed Pixiv batch: found ${totalAdded} items total`, false, newMediaItems);
+                }
+                
+                // RESOURCE MANAGEMENT - Dynamic rate limiting based on success rate
+                const successCount = results.filter(r => r.status === 'fulfilled' && r.value && r.value.linksAdded > 0).length;
+                const successRate = successCount / batch.length;
+                
+                // If success rate is low, wait longer before next batch
+                const waitTime = successRate < 0.5 ? 
+                    CONFIG.RATE_LIMIT.minTime * 2 : 
+                    CONFIG.RATE_LIMIT.minTime;
+                    
+                await new Promise(resolve => setTimeout(resolve, waitTime));
             }
 
-            const nextPageSelector = await findNextPageSelector(page, pageCount, feedPageUrl);
-            if (nextPageSelector) {
-                await page.waitForSelector(nextPageSelector, { timeout: 2000 });
-                await page.click(nextPageSelector);
-                await page.evaluate(() => window.scrollBy(0, window.innerHeight));
-                feedPageUrl = page.url();
-                pageCount++;
-            } else {
-                console.log('No next page button found, moving to the next saved link.');
+            try {
+                if (feedPageUrl.includes('bookmark_new_illust')) { 
+                    const nextPageUrl = `https://www.pixiv.net/bookmark_new_illust_r18.php?p=${pageCount + 2}`;
+                    await page.goto(nextPageUrl, { waitUntil: 'networkidle2' });
+                    feedPageUrl = nextPageUrl;
+                    pageCount++;
+                } else {
+                    const nextPageSelector = await findNextPageSelector(page, pageCount, feedPageUrl);
+                    if (nextPageSelector) {
+                        await page.waitForSelector(nextPageSelector, { timeout: 2000 });
+                        await page.click(nextPageSelector);
+                        feedPageUrl = page.url();
+                        pageCount++;
+                    } else {
+                        console.log('No next page button found, moving to the next saved link.');
+                        break;
+                    }
+                }
+            }
+            catch (error) {
+                console.log('Error navigating to next page:', error.message);
+                console.log('Pixiv link completed, moving to the next saved link.');
                 break;
             }
 
             console.log(`New links added: ${uniqueNewPostLinks.length}`);
-            console.log(`Total links count: ${postLinksQueue.length}`);
+            console.log(`Total links count: ${totalAdded}`);
         }
     } finally {
         // Clear interval when done
@@ -1478,5 +1620,10 @@ const saveTagsByDomain = (tags, domain, username) => {
     }
 };
 
-module.exports = { scrapeVideos, scrapeSavedLinks };
+// Export the required functions and configurations
+module.exports = {
+  scrapeVideos,
+  loginToPixiv,
+  CONFIG
+};
 

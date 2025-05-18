@@ -2145,6 +2145,20 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
     padding: 10px;
     top: 110px;
   }
+
+  /* Collection tabs styling */
+  .collection-tabs {
+    width: 100%;
+    justify-content: center;
+    margin-left: 0;
+    margin-top: 10px;
+    margin-bottom: 10px;
+  }
+
+  .collection-tab {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
 }
 
 /* Very small screens (mobile phones in portrait) */
@@ -2173,6 +2187,12 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
   .masonry-grid {
     margin-top: 150px;
   }
+
+  .collection-tab {
+    padding: 5px 8px;
+    font-size: 12px;
+    margin-right: 4px;
+  }
 }
 
 /* Additional fixes for landscape mode on mobile */
@@ -2196,4 +2216,42 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
 .profile-menu-content {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+}
+
+/* Collection tabs styling */
+.collection-tabs {
+  display: flex;
+  margin-left: 20px;
+  align-items: center;
+}
+
+.collection-tab {
+  background: none;
+  border: none;
+  padding: 8px 16px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 18px;
+  transition: all 0.2s ease;
+  margin-right: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+.collection-tab:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.collection-tab.active {
+  background-color: var(--primary-color);
+  color: var(--text-dark);
+  font-weight: 600;
+  box-shadow: 0 2px 6px rgba(0, 191, 165, 0.4);
+}
+
+.collection-tab.active:hover {
+  background-color: var(--primary-hover);
 }

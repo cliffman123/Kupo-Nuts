@@ -10,17 +10,17 @@ const API_URL = config.API_URL;
 const LOCAL_STORAGE_KEY = 'kupoNuts_mediaLinks'; // Add this constant for localStorage key
 
 // Add helper functions for localStorage
-const saveToLocalStorage = (mediaLinks) => {
+const saveToLocalStorage = (mediaLinks, storageKey = LOCAL_STORAGE_KEY) => {
     try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(mediaLinks));
+        localStorage.setItem(storageKey, JSON.stringify(mediaLinks));
     } catch (error) {
         console.error('Error saving to localStorage:', error);
     }
 };
 
-const getFromLocalStorage = () => {
+const getFromLocalStorage = (storageKey = LOCAL_STORAGE_KEY) => {
     try {
-        const data = localStorage.getItem(LOCAL_STORAGE_KEY);
+        const data = localStorage.getItem(storageKey);
         return data ? JSON.parse(data) : [];
     } catch (error) {
         console.error('Error reading from localStorage:', error);
@@ -28,14 +28,14 @@ const getFromLocalStorage = () => {
     }
 };
 
-const addToLocalStorage = (mediaItem) => {
+const addToLocalStorage = (mediaItem, storageKey = LOCAL_STORAGE_KEY) => {
     try {
-        const currentLinks = getFromLocalStorage();
+        const currentLinks = getFromLocalStorage(storageKey);
         // Check if item already exists to prevent duplicates
         const exists = currentLinks.some(item => item.postLink === mediaItem.postLink);
         if (!exists) {
             currentLinks.push(mediaItem);
-            saveToLocalStorage(currentLinks);
+            saveToLocalStorage(currentLinks, storageKey);
         }
         return currentLinks;
     } catch (error) {
@@ -78,6 +78,12 @@ const VideoList = () => {
     const [searchQuery, setSearchQuery] = useState(''); // New unified search query
     const guestId = useRef(localStorage.getItem('kupoguestid') || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
     const [showDefaultLinks, setShowDefaultLinks] = useState(false); // Add state for showing default links
+    const [activeCollection, setActiveCollection] = useState('main'); // Add state for active collection
+    const [collections, setCollections] = useState([
+        { id: 'main', name: 'Main', storageKey: LOCAL_STORAGE_KEY },
+        { id: 'sub', name: 'Sub', storageKey: 'kupoNuts_sub' },
+        { id: 'extra', name: 'Extra', storageKey: 'kupoNuts_extra' }
+    ]); // Add predefined collections
     const prevScrollY = useRef(0); // Add ref to track previous scroll position
     const mediaRefs = useRef([]);
     const mediaSet = useRef(new Set());
@@ -188,8 +194,10 @@ const VideoList = () => {
                     defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
                 }
             } else {
-                // Non-logged in users - prioritize links from localStorage
-                const localStorageLinks = getFromLocalStorage();
+                // Non-logged in users - prioritize links from localStorage based on active collection
+                const currentCollection = collections.find(c => c.id === activeCollection);
+                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                const localStorageLinks = getFromLocalStorage(storageKey);
                 
                 if (localStorageLinks && localStorageLinks.length > 0) {
                     // Format localStorage data to match expected array format
@@ -275,7 +283,9 @@ const VideoList = () => {
             
             // As a fallback for non-logged in users when fetch fails, use localStorage and defaults
             if (!isLoggedIn) {
-                const localStorageLinks = getFromLocalStorage();
+                const currentCollection = collections.find(c => c.id === activeCollection);
+                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                const localStorageLinks = getFromLocalStorage(storageKey);
                 let mediaLinks = [];
                 
                 if (localStorageLinks && localStorageLinks.length > 0) {
@@ -361,7 +371,7 @@ const VideoList = () => {
         } finally {
             setLoading(false);
         }
-    }, [filter, isLoggedIn, shuffleArray, tagFilter, showDefaultLinks, filterMediaByTag, applyTagBlacklist]);
+    }, [filter, isLoggedIn, shuffleArray, tagFilter, showDefaultLinks, filterMediaByTag, applyTagBlacklist, activeCollection, collections]);
 
     const setCookies = () => {
         const cookies = JSON.parse(localStorage.getItem('cookies'));
@@ -484,9 +494,11 @@ const VideoList = () => {
                     throw new Error('Failed to remove media');
                 }
             } else {
-                // For non-logged in users, remove from localStorage
-                const localStorageLinks = getFromLocalStorage();
-                saveToLocalStorage(localStorageLinks.filter(item => item.postLink !== postLink));
+                // For non-logged in users, remove from the active collection's localStorage
+                const currentCollection = collections.find(c => c.id === activeCollection);
+                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                const localStorageLinks = getFromLocalStorage(storageKey);
+                saveToLocalStorage(localStorageLinks.filter(item => item.postLink !== postLink), storageKey);
             }
 
             // Update the local state to remove the entire post
@@ -1213,85 +1225,114 @@ const VideoList = () => {
         setContentFilter(savedContentFilter);
     }, []);
 
+    useEffect(() => {
+        const savedActiveCollection = getActiveCollectionFromCookie();
+        setActiveCollection(savedActiveCollection);
+    }, []);
+
     const handleExport = async () => {
         try {
-            const mediaResponse = await fetch(`${API_URL}/api/export-links`, {
-                ...fetchConfig,
-                headers: {
-                    ...fetchConfig.headers,
-                    'Accept': 'application/json'
+            if (isLoggedIn) {
+                // Server-side export for logged-in users remains unchanged
+                const mediaResponse = await fetch(`${API_URL}/api/export-links`, {
+                    ...fetchConfig,
+                    headers: {
+                        ...fetchConfig.headers,
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!mediaResponse.ok) {
+                    throw new Error(`Failed to export media links: ${mediaResponse.statusText}`);
                 }
-            });
-            
-            if (!mediaResponse.ok) {
-                throw new Error(`Failed to export media links: ${mediaResponse.statusText}`);
-            }
-            
-            const scrapeResponse = await fetch(`${API_URL}/api/export-scrape-list`, {
-                ...fetchConfig,
-                headers: {
-                    ...fetchConfig.headers,
-                    'Accept': 'application/json'
+                
+                const scrapeResponse = await fetch(`${API_URL}/api/export-scrape-list`, {
+                    ...fetchConfig,
+                    headers: {
+                        ...fetchConfig.headers,
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (!scrapeResponse.ok) {
+                    throw new Error(`Failed to export scrape links: ${scrapeResponse.statusText}`);
                 }
-            });
-            
-            if (!scrapeResponse.ok) {
-                throw new Error(`Failed to export scrape links: ${scrapeResponse.statusText}`);
-            }
 
-            // Parse responses with error handling
-            let mediaData;
-            let scrapeData;
-            
-            try {
-                mediaData = await mediaResponse.json();
-                // Accept either array or object with links property
-                if (!Array.isArray(mediaData) && !mediaData.links) {
-                    mediaData = []; // Default to empty array if no valid data
+                // Parse responses with error handling
+                let mediaData;
+                let scrapeData;
+                
+                try {
+                    mediaData = await mediaResponse.json();
+                    // Accept either array or object with links property
+                    if (!Array.isArray(mediaData) && !mediaData.links) {
+                        mediaData = []; // Default to empty array if no valid data
+                    }
+                    // Convert to array if it's in object format
+                    mediaData = Array.isArray(mediaData) ? mediaData : mediaData.links || [];
+                } catch (error) {
+                    console.error('Media parse error:', error);
+                    mediaData = []; // Default to empty array on parse error
                 }
-                // Convert to array if it's in object format
-                mediaData = Array.isArray(mediaData) ? mediaData : mediaData.links || [];
-            } catch (error) {
-                console.error('Media parse error:', error);
-                mediaData = []; // Default to empty array on parse error
-            }
 
-            try {
-                scrapeData = await scrapeResponse.json();
-                // Accept either array or object format
-                if (typeof scrapeData === 'string') {
-                    scrapeData = [scrapeData]; // Convert single string to array
-                } else if (!Array.isArray(scrapeData) && typeof scrapeData === 'object') {
-                    scrapeData = scrapeData.urls || Object.values(scrapeData) || []; // Try to extract URLs
-                } else if (!Array.isArray(scrapeData)) {
-                    scrapeData = []; // Default to empty array if no valid data
+                try {
+                    scrapeData = await scrapeResponse.json();
+                    // Accept either array or object format
+                    if (typeof scrapeData === 'string') {
+                        scrapeData = [scrapeData]; // Convert single string to array
+                    } else if (!Array.isArray(scrapeData) && typeof scrapeData === 'object') {
+                        scrapeData = scrapeData.urls || Object.values(scrapeData) || []; // Try to extract URLs
+                    } else if (!Array.isArray(scrapeData)) {
+                        scrapeData = []; // Default to empty array if no valid data
+                    }
+                } catch (error) {
+                    console.error('Scrape parse error:', error);
+                    scrapeData = []; // Default to empty array on parse error
                 }
-            } catch (error) {
-                console.error('Scrape parse error:', error);
-                scrapeData = []; // Default to empty array on parse error
-            }
-            
-            // Create zip file with error handling
-            try {
-                const zip = new JSZip();
-                zip.file("media-links.json", JSON.stringify(mediaData, null, 2));
-                zip.file("scrape-links.json", JSON.stringify(scrapeData, null, 2));
                 
-                const content = await zip.generateAsync({ type: "blob" });
+                // Create zip file with error handling
+                try {
+                    const zip = new JSZip();
+                    zip.file("media-links.json", JSON.stringify(mediaData, null, 2));
+                    zip.file("scrape-links.json", JSON.stringify(scrapeData, null, 2));
+                    
+                    const content = await zip.generateAsync({ type: "blob" });
+                    
+                    // Create download link
+                    const url = window.URL.createObjectURL(content);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'KupoNutEX.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    
+                    showNotification('Collection exported successfully', 'success');
+                } catch (error) {
+                    throw new Error('Failed to create zip file: ' + error.message);
+                }
+            } else {
+                // For non-logged in users, export only the active collection
+                const currentCollection = collections.find(c => c.id === activeCollection);
+                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                const localData = getFromLocalStorage(storageKey);
                 
-                // Create download link
-                const url = window.URL.createObjectURL(content);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'KupoNutEX.zip';
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
-                
-                showNotification('Collection exported successfully', 'success');
-            } catch (error) {
-                throw new Error('Failed to create zip file: ' + error.message);
+                if (localData && localData.length > 0) {
+                    const dataStr = JSON.stringify(localData, null, 2);
+                    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                    const url = URL.createObjectURL(dataBlob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `kupo-nuts-${currentCollection.id}-collection.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    showNotification(`${currentCollection.name} collection exported successfully`, 'success');
+                } else {
+                    showNotification(`No items in ${currentCollection.name} collection to export`, 'info');
+                }
             }
         } catch (error) {
             console.error('Export error:', error);
@@ -1342,9 +1383,11 @@ const VideoList = () => {
                         
                         showNotification(`Successfully imported ${validContent.length} links`, 'success');
                     } else {
-                        // Local storage import for non-logged-in users
-                        saveToLocalStorage(validContent);
-                        showNotification(`Successfully imported ${validContent.length} links to local storage`, 'success');
+                        // Local storage import for non-logged-in users - use active collection
+                        const currentCollection = collections.find(c => c.id === activeCollection);
+                        const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                        saveToLocalStorage(validContent, storageKey);
+                        showNotification(`Successfully imported ${validContent.length} links to ${currentCollection.name} collection`, 'success');
                     }
                     
                     // Refresh the display in both cases
@@ -1665,8 +1708,13 @@ const VideoList = () => {
                             
                             // For non-logged in users, also add to localStorage
                             if (!isLoggedIn) {
+                                // Get current collection's storage key
+                                const currentCollection = collections.find(c => c.id === activeCollection);
+                                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                                
                                 data.newItems.forEach(item => {
-                                    addToLocalStorage(item);
+                                    // Use the active collection's storage key
+                                    addToLocalStorage(item, storageKey);
                                 });
                             }
 
@@ -1936,6 +1984,38 @@ const VideoList = () => {
         return () => clearTimeout(timer);
     }, [fullscreenMedia, setupVideoObservers]);
 
+    const getActiveCollectionStorageKey = () => {
+        const currentCollection = collections.find(c => c.id === activeCollection);
+        return currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+    };
+
+    const handleCollectionSwitch = (collectionId) => {
+        if (collectionId === activeCollection) return;
+        
+        setActiveCollection(collectionId);
+        setCurrentPage(1);
+        setMediaUrls([]);
+        mediaSet.current.clear();
+        
+        // Save preference
+        document.cookie = `active_collection=${collectionId}; max-age=31536000; path=/`;
+        
+        // Show notification
+        const collection = collections.find(c => c.id === collectionId);
+        if (collection) {
+            showNotification(`Switched to ${collection.name} collection`, 'success');
+        }
+        
+        // Reload content with the new collection
+        fetchMedia(1, initialMediaPerPage);
+    };
+
+    // Get active collection from cookie on init
+    const getActiveCollectionFromCookie = () => {
+        const match = document.cookie.match(/active_collection=([^;]+)/);
+        return match ? match[1] : 'main';
+    };
+
     return (
         <div>
             <div className="top-search-bar">
@@ -1947,6 +2027,19 @@ const VideoList = () => {
                     >
                         <i className="fas fa-cat logo-icon"></i>
                         <span>Kupo Nuts</span>
+                    </div>
+                    
+                    <div className="collection-tabs">
+                        {collections.map(collection => (
+                            <button
+                                key={collection.id}
+                                className={`collection-tab ${activeCollection === collection.id ? 'active' : ''}`}
+                                onClick={() => handleCollectionSwitch(collection.id)}
+                                title={`Switch to ${collection.name} collection`}
+                            >
+                                {collection.name}
+                            </button>
+                        ))}
                     </div>
                 </div>
                 
@@ -2249,21 +2342,25 @@ const VideoList = () => {
                                         <button className="profile-menu-button" onClick={() => {
                                             // For non-logged in users, directly export from localStorage
                                             try {
-                                                const localData = getFromLocalStorage();
+                                                // Use the active collection instead of the default
+                                                const currentCollection = collections.find(c => c.id === activeCollection);
+                                                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                                                const localData = getFromLocalStorage(storageKey);
+                                                
                                                 if (localData && localData.length > 0) {
                                                     const dataStr = JSON.stringify(localData, null, 2);
                                                     const dataBlob = new Blob([dataStr], { type: 'application/json' });
                                                     const url = URL.createObjectURL(dataBlob);
                                                     const a = document.createElement('a');
                                                     a.href = url;
-                                                    a.download = 'kupo-nuts-local-collection.json';
+                                                    a.download = `kupo-nuts-${currentCollection.id}-collection.json`;
                                                     document.body.appendChild(a);
                                                     a.click();
                                                     document.body.removeChild(a);
                                                     URL.revokeObjectURL(url);
-                                                    showNotification('Local collection exported successfully', 'success');
+                                                    showNotification(`${currentCollection.name} collection exported successfully`, 'success');
                                                 } else {
-                                                    showNotification('No local collection to export', 'info');
+                                                    showNotification(`No items in ${currentCollection.name} collection to export`, 'info');
                                                 }
                                             } catch (error) {
                                                 showNotification('Failed to export local collection', 'error');
@@ -2288,9 +2385,18 @@ const VideoList = () => {
                                                             try {
                                                                 const json = JSON.parse(e.target.result);
                                                                 if (Array.isArray(json)) {
-                                                                    saveToLocalStorage(json);
+                                                                    // Use the active collection's storage key, not the default
+                                                                    const currentCollection = collections.find(c => c.id === activeCollection);
+                                                                    const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                                                                    
+                                                                    // Save to the active collection
+                                                                    saveToLocalStorage(json, storageKey);
+                                                                    
+                                                                    // Update the UI
                                                                     setMediaUrls(json.map(item => [item.postLink || '', item.videoLinks]));
-                                                                    showNotification('Local collection imported successfully', 'success');
+                                                                    
+                                                                    // Show a notification with the collection name
+                                                                    showNotification(`Successfully imported ${json.length} links to ${currentCollection.name} collection`, 'success');
                                                                 } else {
                                                                     showNotification('Invalid file format', 'error');
                                                                 }
