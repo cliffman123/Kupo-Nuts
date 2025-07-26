@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import Masonry from 'react-masonry-css';
 import './VideoList.css';
-import JSZip from 'jszip';
 import defaultLinks from './default-links.json';
 import config from '../config'; // Import the config file
 import io from 'socket.io-client';
@@ -47,27 +46,12 @@ const addToLocalStorage = (mediaItem, storageKey = LOCAL_STORAGE_KEY) => {
 const VideoList = () => {
     const [mediaUrls, setMediaUrls] = useState([]);
     const [currentPage, setCurrentPage] = useState(1);
-    const [scrapeUrl, setScrapeUrl] = useState('');
     const [fullscreenMedia, setFullscreenMedia] = useState(null);
     const [loading, setLoading] = useState(false);
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [autoScroll, setAutoScroll] = useState(!isLoggedIn);
-    const [filter, setFilter] = useState('random'); // Default to random for non-logged in users
+    const [autoScroll, setAutoScroll] = useState(false);
+    const [filter, setFilter] = useState('random'); // Default to random
     const [showSettings, setShowSettings] = useState(false);
     const [notifications, setNotifications] = useState([]);
-    const [showLogin, setShowLogin] = useState(false);
-    const [isRegistering, setIsRegistering] = useState(false);
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
-    const [loginError, setLoginError] = useState('');
-    const [passwordRequirements, setPasswordRequirements] = useState({
-        length: false,
-        uppercase: false,
-        lowercase: false,
-        number: false,
-        special: false
-    });
-    const [showProfileMenu, setShowProfileMenu] = useState(false);
     const [isClickable, setIsClickable] = useState(true);
     const [loadedMedia, setLoadedMedia] = useState({});
     const [randomSeed, setRandomSeed] = useState(Date.now());
@@ -84,7 +68,10 @@ const VideoList = () => {
         { id: 'sub', name: 'Sub', storageKey: 'kupoNuts_sub' },
         { id: 'extra', name: 'Extra', storageKey: 'kupoNuts_extra' }
     ]); // Add predefined collections
+    const [showMobileMenu, setShowMobileMenu] = useState(false); // Add state for mobile menu
+    const [isMobile, setIsMobile] = useState(false); // Add state to track mobile viewport
     const prevScrollY = useRef(0); // Add ref to track previous scroll position
+    const scrollAnimation = useRef(null); // Add ref for scroll animation
     const mediaRefs = useRef([]);
     const mediaSet = useRef(new Set());
     const observer = useRef();
@@ -95,6 +82,10 @@ const VideoList = () => {
     const [tagBlacklist, setTagBlacklist] = useState('');
     const [scrollSpeed, setScrollSpeed] = useState(3); // Default scroll speed
     const [tagSearchQuery, setTagSearchQuery] = useState('');
+    
+    // Konami Code state for hidden NSFW toggle
+    const [konamiSequence, setKonamiSequence] = useState([]);
+    const konamiCode = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA'];
     let defaultMediaLinks = [];
 
     const initialMediaPerPage = 8;
@@ -169,61 +160,28 @@ const VideoList = () => {
     const fetchMedia = useCallback(async (page, limit) => {
         setLoading(true);
         try {
-            let mediaLinks;
-            if (isLoggedIn) {
-                const response = await fetch(`${API_URL}/api/media`, {
-                    ...fetchConfig,
-                    cache: 'no-cache'
-                });
-                
-                if (!response.ok) {
-                    if (response.status === 401) {
-                        //setIsLoggedIn(false);
-                        //throw new Error('Jlullaby');
-                    }
-                    //throw new Error('Network response was not ok');
-                }
-                
-                const data = await response.json();
-                if (data && data.length > 0) {
-                    mediaLinks = data.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
-                }
-                
-                // Load default links if option is enabled
-                if (showDefaultLinks && defaultLinks?.length > 0) {
-                    defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
-                }
-            } else {
-                // Non-logged in users - prioritize links from localStorage based on active collection
-                const currentCollection = collections.find(c => c.id === activeCollection);
-                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-                const localStorageLinks = getFromLocalStorage(storageKey);
-                
-                if (localStorageLinks && localStorageLinks.length > 0) {
-                    // Format localStorage data to match expected array format
-                    mediaLinks = localStorageLinks.map(item => [
-                        item.postLink || '',
-                        item.videoLinks || [],
-                        item.tags || {}
-                    ]);
-                }
-                
-                // Add default links when localStorage is empty or showDefaultLinks is enabled
-                if ((mediaLinks.length === 0 || showDefaultLinks) && defaultLinks?.length > 0) {
-                    defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
-                }
+            let mediaLinks = [];
+            
+            // Always use localStorage based on active collection
+            const currentCollection = collections.find(c => c.id === activeCollection);
+            const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+            const localStorageLinks = getFromLocalStorage(storageKey);
+            
+            if (localStorageLinks && localStorageLinks.length > 0) {
+                // Format localStorage data to match expected array format
+                mediaLinks = localStorageLinks.map(item => [
+                    item.postLink || '',
+                    item.videoLinks || [],
+                    item.tags || {}
+                ]);
             }
             
-            // Combine user links with default links if needed
-            if (defaultMediaLinks.length > 0) {
-                if (isLoggedIn && showDefaultLinks) {
-                    mediaLinks = [...mediaLinks, ...defaultMediaLinks];
-                } else if (!isLoggedIn) {
-                    // For non-logged in users, ensure we add default links if empty or requested
-                    mediaLinks = mediaLinks.length > 0 ? 
-                        (showDefaultLinks ? [...mediaLinks, ...defaultMediaLinks] : mediaLinks) : 
-                        defaultMediaLinks;
-                }
+            // Add default links when localStorage is empty or showDefaultLinks is enabled
+            if ((mediaLinks.length === 0 || showDefaultLinks) && defaultLinks?.length > 0) {
+                const defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
+                mediaLinks = mediaLinks.length > 0 ? 
+                    (showDefaultLinks ? [...mediaLinks, ...defaultMediaLinks] : mediaLinks) : 
+                    defaultMediaLinks;
             }
 
             // Step 2: Apply tag filtering if needed
@@ -280,98 +238,96 @@ const VideoList = () => {
             }
             
         } catch (error) {
+            console.error('Error fetching media:', error);
             
-            // As a fallback for non-logged in users when fetch fails, use localStorage and defaults
-            if (!isLoggedIn) {
-                const currentCollection = collections.find(c => c.id === activeCollection);
-                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-                const localStorageLinks = getFromLocalStorage(storageKey);
-                let mediaLinks = [];
+            // Fallback to localStorage and defaults
+            const currentCollection = collections.find(c => c.id === activeCollection);
+            const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+            const localStorageLinks = getFromLocalStorage(storageKey);
+            let mediaLinks = [];
+            
+            if (localStorageLinks && localStorageLinks.length > 0) {
+                mediaLinks = localStorageLinks.map(item => [
+                    item.postLink || '',
+                    item.videoLinks || [],
+                    item.tags || {},
+                    { isUserContent: true } // Mark as user content
+                ]);
+            }
+            
+            // Always show defaults in error cases if localStorage is empty
+            if (mediaLinks.length === 0 && defaultLinks?.length > 0) {
+                const defaultMediaLinks = defaultLinks.map(item => [
+                    item.postLink || '', 
+                    item.videoLinks, 
+                    item.tags || {},
+                    { isDefault: true } // Mark as default content
+                ]);
+                mediaLinks = defaultMediaLinks;
+            } else if (showDefaultLinks && defaultLinks?.length > 0) {
+                // Add default links when showDefaultLinks is enabled
+                const defaultMediaLinks = defaultLinks.map(item => [
+                    item.postLink || '', 
+                    item.videoLinks, 
+                    item.tags || {},
+                    { isDefault: true } // Mark as default content
+                ]);
+                mediaLinks = [...mediaLinks, ...defaultMediaLinks];
+            }
+            
+            if (mediaLinks.length > 0) {
+                // Apply filtering, sorting, and pagination similar to the main function
+                if (tagFilter) {
+                    mediaLinks = filterMediaByTag(mediaLinks, tagFilter);
+                }
+
+                mediaLinks = applyTagBlacklist(mediaLinks);
                 
-                if (localStorageLinks && localStorageLinks.length > 0) {
-                    mediaLinks = localStorageLinks.map(item => [
-                        item.postLink || '',
-                        item.videoLinks || [],
-                        item.tags || {},
-                        { isUserContent: true } // Mark as user content
-                    ]);
+                let sortedMediaLinks = [];
+
+                const userItems = mediaLinks.filter(item => item[3]?.isUserContent).reverse();
+                const defaultItems = mediaLinks.filter(item => item[3]?.isDefault).reverse();
+
+                switch (filter.toLowerCase()) {
+                    case 'newest':
+                        // Keep local storage items first (in reverse order)
+                        // followed by default items (also in reverse order)
+                        sortedMediaLinks = [...userItems, ...defaultItems];
+                        break;
+                    case 'random':
+                        sortedMediaLinks = shuffleArray([...mediaLinks]);
+                        break;
+                    case 'oldest':
+                        sortedMediaLinks = [...mediaLinks];
+                        break;
+                    default:
+                        sortedMediaLinks = shuffleArray([...mediaLinks]);
+                        break;
                 }
                 
-                // Always show defaults in error cases if localStorage is empty
-                if (mediaLinks.length === 0 && defaultLinks?.length > 0) {
-                    const defaultMediaLinks = defaultLinks.map(item => [
-                        item.postLink || '', 
-                        item.videoLinks, 
-                        item.tags || {},
-                        { isDefault: true } // Mark as default content
-                    ]);
-                    mediaLinks = defaultMediaLinks;
-                } else if (showDefaultLinks && defaultLinks?.length > 0) {
-                    // Add default links when showDefaultLinks is enabled
-                    const defaultMediaLinks = defaultLinks.map(item => [
-                        item.postLink || '', 
-                        item.videoLinks, 
-                        item.tags || {},
-                        { isDefault: true } // Mark as default content
-                    ]);
-                    mediaLinks = [...mediaLinks, ...defaultMediaLinks];
+                const totalAvailableItems = sortedMediaLinks.length;
+                const startIndex = (page - 1) * limit;
+                const endIndex = Math.min(startIndex + limit, totalAvailableItems);
+                const pageMediaUrls = sortedMediaLinks.slice(startIndex, endIndex);
+                
+                if (startIndex >= totalAvailableItems) {
+                    console.log('Reached the end of media items, refreshing...');
+                    return;
                 }
                 
-                if (mediaLinks.length > 0) {
-                    // Apply filtering, sorting, and pagination similar to the main function
-                    if (tagFilter) {
-                        mediaLinks = filterMediaByTag(mediaLinks, tagFilter);
-                    }
-
-                    mediaLinks = applyTagBlacklist(mediaLinks);
-                    
-                    let sortedMediaLinks = [];
-
-                    const userItems = mediaLinks.filter(item => item[3]?.isUserContent).reverse();
-                    const defaultItems = mediaLinks.filter(item => item[3]?.isDefault).reverse();
-
-                    switch (filter.toLowerCase()) {
-                        case 'newest':
-                            // For non-logged in users, keep local storage items first (in reverse order)
-                            // followed by default items (also in reverse order)
-                            sortedMediaLinks = [...userItems, ...defaultItems];
-                            break;
-                        case 'random':
-                            sortedMediaLinks = shuffleArray([...mediaLinks]);
-                            break;
-                        case 'oldest':
-                            sortedMediaLinks = [...mediaLinks];
-                            break;
-                        default:
-                            sortedMediaLinks = shuffleArray([...mediaLinks]);
-                            break;
-                    }
-                    
-                    const totalAvailableItems = sortedMediaLinks.length;
-                    const startIndex = (page - 1) * limit;
-                    const endIndex = Math.min(startIndex + limit, totalAvailableItems);
-                    const pageMediaUrls = sortedMediaLinks.slice(startIndex, endIndex);
-                    
-                    if (startIndex >= totalAvailableItems) {
-                        console.log('Reached the end of media items, refreshing...');
-                        return;
-                    }
-                    
-                    if (page === 1) {
-                        mediaSet.current.clear();
-                        setMediaUrls(pageMediaUrls);
-                    } else {
-                        const uniqueMediaUrls = pageMediaUrls.filter(media => !mediaSet.current.has(media[1][0]));
-                        uniqueMediaUrls.forEach(media => mediaSet.current.add(media[1][0]));
-                        setMediaUrls(prevMediaUrls => [...prevMediaUrls, ...uniqueMediaUrls]);
-                    }
-                    
+                if (page === 1) {
+                    mediaSet.current.clear();
+                    setMediaUrls(pageMediaUrls);
+                } else {
+                    const uniqueMediaUrls = pageMediaUrls.filter(media => !mediaSet.current.has(media[1][0]));
+                    uniqueMediaUrls.forEach(media => mediaSet.current.add(media[1][0]));
+                    setMediaUrls(prevMediaUrls => [...prevMediaUrls, ...uniqueMediaUrls]);
                 }
             }
         } finally {
             setLoading(false);
         }
-    }, [filter, isLoggedIn, shuffleArray, tagFilter, showDefaultLinks, filterMediaByTag, applyTagBlacklist, activeCollection, collections]);
+    }, [filter, shuffleArray, tagFilter, showDefaultLinks, filterMediaByTag, applyTagBlacklist, activeCollection, collections]);
 
     const setCookies = () => {
         const cookies = JSON.parse(localStorage.getItem('cookies'));
@@ -379,20 +335,6 @@ const VideoList = () => {
             cookies.forEach(cookie => {
                 document.cookie = `${cookie.name}=${cookie.value}; domain=${cookie.domain}; path=${cookie.path}`;
             });
-        }
-    };
-
-    const fetchTweetsFromList = async (username) => {
-        try {
-            const response = await fetch(`${API_URL}/api/tweets`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username }),
-                ...fetchConfig
-            });
-            if (!response.ok) throw new Error('Network response was not ok');
-        } catch (error) {
-            alert('Failed to fetch tweets. Please try again later.');
         }
     };
 
@@ -433,22 +375,17 @@ const VideoList = () => {
     };
 
     const handleScrape = async (url = null) => {
-        const urlToScrape = url || scrapeUrl;
+        const urlToScrape = url;
 
         try {
             const headers = {
                 'Content-Type': 'application/json',
-                ...(isLoggedIn ? {
-                    'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
-                } : {
-                    'x-guest-id': guestId.current
-                })
+                'x-guest-id': guestId.current
             };
 
             console.log('Scraping URL:', urlToScrape);
-            console.log(isLoggedIn ? 'Logged in' : 'Guest user');
+            console.log('Guest user');
             
-            // Use the same API endpoint for both logged-in and guest users
             const response = await fetch(`${API_URL}/api/scrape`, {
                 method: 'POST',
                 headers: headers,
@@ -457,18 +394,11 @@ const VideoList = () => {
             });
             
             if (!response.ok) {
-                if (response.status === 401) {
-                    throw new Error('Please login to scrape media');
-                }
                 throw new Error('Network response was not ok');
             }
             
-            // For both logged-in users and guests, results will come through WebSocket
-            if (!isLoggedIn) {
-                showNotification('Scraping started - results will be saved to your browser', 'info');
-            }
-            
-            setScrapeUrl('');
+            // Results will come through WebSocket and be saved to browser
+            showNotification('Scraping started - results will be saved to your browser', 'info');
             
         } catch (error) {
             console.error('Failed to scrape:', error);
@@ -479,27 +409,11 @@ const VideoList = () => {
 
     const handleRemove = async (postLink) => {
         try {
-            if (isLoggedIn) {
-                // Original server-side remove logic
-                const response = await fetch(`${API_URL}/api/remove`, {
-                    method: 'POST',
-                    headers: { 
-                        'Content-Type': 'application/json',
-                    },
-                    ...fetchConfig,
-                    body: JSON.stringify({ postLink }),
-                });
-
-                if (!response.ok) {
-                    throw new Error('Failed to remove media');
-                }
-            } else {
-                // For non-logged in users, remove from the active collection's localStorage
-                const currentCollection = collections.find(c => c.id === activeCollection);
-                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-                const localStorageLinks = getFromLocalStorage(storageKey);
-                saveToLocalStorage(localStorageLinks.filter(item => item.postLink !== postLink), storageKey);
-            }
+            // Remove from the active collection's localStorage
+            const currentCollection = collections.find(c => c.id === activeCollection);
+            const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+            const localStorageLinks = getFromLocalStorage(storageKey);
+            saveToLocalStorage(localStorageLinks.filter(item => item.postLink !== postLink), storageKey);
 
             // Update the local state to remove the entire post
             setMediaUrls(prevMediaUrls => 
@@ -510,32 +424,6 @@ const VideoList = () => {
         } catch (error) {
             console.error('Failed to remove media:', error);
             showNotification('Failed to remove media', 'error');
-        }
-    };
-
-    const addScrapeUrlToFile = async (url) => {
-        try {
-            const response = await fetch(`${API_URL}/api/save-scrape-url`, {
-                method: 'POST',
-                headers: { 
-                    'Content-Type': 'application/json',
-                    // Add credentials header if needed
-                    'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
-                },
-                ...fetchConfig,
-                body: JSON.stringify({ url }),
-            });
-            if (!response.ok) {
-                if (response.status === 401) {
-                    //setIsLoggedIn(false);
-                    //setShowLogin(true);
-                    //throw new Error('Please login to save scrape URL');
-                }
-                throw new Error('Network response was not ok');
-            }
-        } catch (error) {
-            console.error('Failed to add scrape URL to file:', error);
-            showNotification(error.message || 'Failed to save scrape URL', 'error');
         }
     };
 
@@ -558,11 +446,7 @@ const VideoList = () => {
 
         const headers = {
             'Content-Type': 'application/json',
-            ...(isLoggedIn ? {
-                'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
-            } : {
-                'x-guest-id': guestId.current
-            })
+            'x-guest-id': guestId.current
         };
 
         try {
@@ -578,10 +462,8 @@ const VideoList = () => {
                 throw new Error(errorData.message || 'Failed to find similar posts');
             }
             
-            // For both user types, show appropriate notification
-            if (!isLoggedIn) {
-                showNotification('Similar search started - results will be saved to your browser', 'info');
-            }
+            // Show appropriate notification
+            showNotification('Similar search started - results will be saved to your browser', 'info');
             
         } catch (error) {
             console.error('Failed to find similar:', error);
@@ -610,14 +492,10 @@ const VideoList = () => {
 
             const headers = {
                 'Content-Type': 'application/json',
-                ...(isLoggedIn ? {
-                    'Authorization': `Bearer ${document.cookie.split('token=')[1]}`
-                } : {
-                    'x-guest-id': guestId.current
-                })
+                'x-guest-id': guestId.current
             };
 
-            console.log(isLoggedIn ? 'Logged in' : 'Guest user');
+            console.log('Guest user');
             
             const response = await fetch(`${API_URL}/api/search-tags`, {
                 method: 'POST',
@@ -630,18 +508,11 @@ const VideoList = () => {
             });
 
             if (!response.ok) {
-                if (response.status === 401 && isLoggedIn) {
-                    setIsLoggedIn(false);
-                    setShowLogin(true);
-                    throw new Error('Please login to search tags');
-                }
                 throw new Error('Failed to search tags');
             }
             
-            // Appropriate notification for guest users
-            if (!isLoggedIn) {
-                showNotification('Tag search started - results will be saved to your browser', 'info');
-            }
+            // Show notification for guest users
+            showNotification('Tag search started - results will be saved to your browser', 'info');
             
         } catch (error) {
             console.error('Failed to search tags:', error);
@@ -656,22 +527,40 @@ const VideoList = () => {
         }
     }, []);
 
-    const handleMediaClick = (index) => {
+    const handleMediaClick = useCallback((index) => {
         if (!isClickable) return; // Prevent clicking if in cooldown
         setFullscreenMedia(index);
+        console.log("HandleMediaClick was called");
+        
+        // Pause all other videos first
         mediaRefs.current.forEach((media, i) => {
-            if (media && i !== index && media.tagName === 'VIDEO') media.pause();
+            if (media && i !== index && media.tagName === 'VIDEO') {
+                media.pause();
+                media.muted = true;
+            }
         });
 
-        // Play the selected video and unmute it
+        // Play the selected video and unmute it with a slight delay to ensure proper state
         const selectedVideo = mediaRefs.current[index];
         if (selectedVideo && selectedVideo.tagName === 'VIDEO') {
             selectedVideo.muted = false;
             selectedVideo.volume = globalVolume;
-            selectedVideo.play().catch(err => {
-                console.log('Autoplay prevented:', err);
-            });
+            
+            // Use a timeout to ensure the video element is ready
+            setTimeout(() => {
+                selectedVideo.play().catch(err => {
+                    console.log('Autoplay prevented:', err);
+                    // Try to play again with user interaction context
+                    selectedVideo.muted = true;
+                    selectedVideo.play().then(() => {
+                        selectedVideo.muted = false;
+                    }).catch(secondErr => {
+                        console.log('Second autoplay attempt failed:', secondErr);
+                    });
+                });
+            }, 100);
         }
+        
         const mediaContainer = document.getElementById('media-container');
         if (mediaContainer) {
             mediaContainer.classList.add('fullscreen-active');
@@ -679,22 +568,35 @@ const VideoList = () => {
         document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon, .similar-icon, .tag, .tags-panel').forEach(button => {
             button.style.zIndex = '1002';
         });
-        document.querySelector('.profile-button').style.display = 'none';
         scrollToMedia(index);
-    };
+    }, [isClickable, globalVolume, scrollToMedia]);
 
-    const handleMediaClose = () => {
+    const handleMediaClose = useCallback(() => {
         setFullscreenMedia(null);
         setIsClickable(false); // Disable clicking
        
-        // Resume playing all videos in the gallery view, but keep them muted
-        mediaRefs.current.forEach(media => {
+        // Resume playing only videos that are currently in view, but keep them muted
+        mediaRefs.current.forEach((media, index) => {
             if (media && media.tagName === 'VIDEO') {
-                media.muted = true;
-                media.volume = globalVolume;
-                media.play().catch(err => {
-                    console.log('Autoplay prevented:', err);
-                });
+                // Check if the video element is in the viewport
+                const rect = media.getBoundingClientRect();
+                const isInViewport = (
+                    rect.top >= 0 &&
+                    rect.left >= 0 &&
+                    rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+                    rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+                );
+                
+                if (isInViewport) {
+                    media.muted = true;
+                    media.volume = globalVolume;
+                    media.play().catch(err => {
+                        console.log('Autoplay prevented:', err);
+                    });
+                } else {
+                    // Pause videos that are not in view
+                    media.pause();
+                }
             }
         });
 
@@ -705,17 +607,21 @@ const VideoList = () => {
         document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon').forEach(button => {
             button.style.zIndex = '';
         });
-        document.querySelector('.profile-button').style.display = '';
         
         // Enable clicking after 500ms (0.5 seconds)
         setTimeout(() => {
             setIsClickable(true);
         }, 100);
-    };
+    }, [globalVolume]);
 
     const handleClickOutside = (event) => {
         if (fullscreenMedia !== null && !mediaRefs.current[fullscreenMedia]?.contains(event.target) && !event.target.closest('.postlink-icon, .close-icon, .remove-icon, .scrape-button, .auto-scroll-button, .similar-icon, .tag, .tags-panel')) {
             handleMediaClose();
+        }
+        
+        // Close mobile menu when clicking outside
+        if (isMobile && showMobileMenu && !event.target.closest('.mobile-menu-container, .mobile-menu-button, .mobile-dropdown-menu')) {
+            setShowMobileMenu(false);
         }
     };
 
@@ -724,22 +630,81 @@ const VideoList = () => {
 
         if (e.key === 'ArrowDown') {
             const nextIndex = (fullscreenMedia + 1) % mediaUrls.length;
+            
+            // Pause current video
+            const currentMedia = mediaRefs.current[fullscreenMedia];
+            if (currentMedia && currentMedia.tagName === 'VIDEO') {
+                currentMedia.pause();
+                currentMedia.muted = true;
+            }
+            
             setFullscreenMedia(nextIndex);
+            
+            // Play next video
             const nextMedia = mediaRefs.current[nextIndex];
             if (nextMedia && nextMedia.tagName === 'VIDEO') {
-                nextMedia.play().catch(() => {});
+                nextMedia.muted = false;
+                nextMedia.volume = globalVolume;
+                setTimeout(() => {
+                    nextMedia.play().catch(err => {
+                        console.log('Autoplay prevented:', err);
+                        // Fallback: try muted first
+                        nextMedia.muted = true;
+                        nextMedia.play().then(() => {
+                            nextMedia.muted = false;
+                        }).catch(() => {});
+                    });
+                }, 100);
             }
             scrollToMedia(nextIndex);
         } else if (e.key === 'ArrowUp') {
             const prevIndex = (fullscreenMedia - 1 + mediaUrls.length) % mediaUrls.length;
+            
+            // Pause current video
+            const currentMedia = mediaRefs.current[fullscreenMedia];
+            if (currentMedia && currentMedia.tagName === 'VIDEO') {
+                currentMedia.pause();
+                currentMedia.muted = true;
+            }
+            
             setFullscreenMedia(prevIndex);
+            
+            // Play previous video
             const prevMedia = mediaRefs.current[prevIndex];
             if (prevMedia && prevMedia.tagName === 'VIDEO') {
-                prevMedia.play().catch(() => {});
+                prevMedia.muted = false;
+                prevMedia.volume = globalVolume;
+                setTimeout(() => {
+                    prevMedia.play().catch(err => {
+                        console.log('Autoplay prevented:', err);
+                        // Fallback: try muted first
+                        prevMedia.muted = true;
+                        prevMedia.play().then(() => {
+                            prevMedia.muted = false;
+                        }).catch(() => {});
+                    });
+                }, 100);
             }
             scrollToMedia(prevIndex);
         }
-    }, [fullscreenMedia, mediaUrls.length, scrollToMedia]);
+    }, [fullscreenMedia, mediaUrls.length, scrollToMedia, globalVolume]);
+
+    // Debounce function to limit how often intersection triggers
+    const debounce = useCallback((func, delay) => {
+        let timeoutId;
+        return (...args) => {
+            clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => func.apply(null, args), delay);
+        };
+    }, []);
+
+    // Debounced function to handle page increment
+    const debouncedPageIncrement = useCallback(
+        debounce(() => {
+            setCurrentPage(prevPage => prevPage + 1);
+        }, 300), // 300ms debounce delay
+        [debounce]
+    );
 
     const lastMediaElementRef = useCallback(node => {
         if (!node) return;
@@ -747,11 +712,11 @@ const VideoList = () => {
         if (observer.current) observer.current.disconnect();
         observer.current = new IntersectionObserver(entries => {
             if (entries.some(entry => entry.isIntersecting)) {
-                setCurrentPage(prevPage => prevPage + 1);
+               debouncedPageIncrement();
             }
         }, { 
             threshold: 0.1,
-            rootMargin: '100px'
+            rootMargin: autoScroll ? '300px' : '100px' // Larger margin during auto-scroll
         });
                            
         const lastColumnItems = document.querySelectorAll('.masonry-grid_column > div:last-child');
@@ -761,19 +726,63 @@ const VideoList = () => {
         
         // Also observe the provided node
         observer.current.observe(node);
+    }, [autoScroll, debouncedPageIncrement]); // Add debouncedPageIncrement dependency
+
+    // Handle window resize for responsive behavior
+    useEffect(() => {
+        const handleResize = () => {
+            const isMobileView = window.innerWidth <= 700; // Adjust breakpoint as needed
+            setIsMobile(isMobileView);
+            if (!isMobileView) {
+                setShowMobileMenu(false); // Close mobile menu when switching to desktop
+            }
+        };
+
+        // Set initial state
+        handleResize();
+
+        // Add event listener
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+            window.removeEventListener('resize', handleResize);
+        };
     }, []);
 
+    // Konami Code detection for hidden NSFW toggle
     useEffect(() => {
-        setCurrentPage(1);
-        setMediaUrls([]);
-        fetchMedia(1, initialMediaPerPage);
-    }, [filter, tagFilter, fetchMedia]);
+        const handleKonamiKeyPress = (e) => {
+            // Only track konami when not in fullscreen to avoid conflicts
+            if (fullscreenMedia !== null) return;
+            // Ignore if typing in input fields
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            setKonamiSequence(prev => {
+                const newSequence = [...prev, e.code].slice(-konamiCode.length);
+                
+                // Check if sequence matches konami code
+                if (newSequence.length === konamiCode.length && 
+                    newSequence.every((key, index) => key === konamiCode[index])) {
+                    const newFilter = contentFilter === 'sfw' ? 'nsfw' : 'sfw';
+                    setContentFilter(newFilter);
+                    saveContentFilterPreference(newFilter);
+                    showNotification(`🎮 Konami activated! Content: ${newFilter.toUpperCase()}`, 'success');
+                    return []; // Reset sequence
+                }
+                
+                return newSequence;
+            });
+        };
+
+        document.addEventListener('keydown', handleKonamiKeyPress);
+        return () => document.removeEventListener('keydown', handleKonamiKeyPress);
+    }, [fullscreenMedia, contentFilter, konamiCode]);
 
     useEffect(() => {
         setCurrentPage(1);
         setMediaUrls([]);
         fetchMedia(1, initialMediaPerPage);
-    }, [tagBlacklist, fetchMedia]);
+    }, [filter, tagFilter, tagBlacklist, fetchMedia]);
 
     useEffect(() => {
         fetchMedia(currentPage, mediaPerPage);
@@ -793,27 +802,82 @@ const VideoList = () => {
     useEffect(() => {
         if (autoScroll && fullscreenMedia !== null) {
             const currentMedia = mediaRefs.current[fullscreenMedia];
-            const videoDuration = currentMedia.tagName === 'VIDEO' ? currentMedia.duration * 1000 : 10000;
+            const videoDuration = currentMedia && currentMedia.tagName === 'VIDEO' ? currentMedia.duration * 1000 : 10000;
             const timeoutId = setTimeout(() => {
                 const nextIndex = (fullscreenMedia + 1) % mediaUrls.length;
+                
+                // Pause current video
+                if (currentMedia && currentMedia.tagName === 'VIDEO') {
+                    currentMedia.pause();
+                    currentMedia.muted = true;
+                }
+                
                 setFullscreenMedia(nextIndex);
+                
+                // Play next video
                 const nextMedia = mediaRefs.current[nextIndex];
                 if (nextMedia && nextMedia.tagName === 'VIDEO') {
-                    nextMedia.play().catch(() => {});
+                    nextMedia.muted = false;
+                    nextMedia.volume = globalVolume;
+                    setTimeout(() => {
+                        nextMedia.play().catch(err => {
+                            console.log('Auto-scroll autoplay prevented:', err);
+                            // Fallback: try muted first
+                            nextMedia.muted = true;
+                            nextMedia.play().then(() => {
+                                nextMedia.muted = false;
+                            }).catch(() => {});
+                        });
+                    }, 100);
                 }
             }, videoDuration <= 1 ? videoDuration * 5 : videoDuration);
             return () => clearTimeout(timeoutId);
         }
-    }, [fullscreenMedia, mediaUrls, autoScroll]);
+    }, [fullscreenMedia, mediaUrls, autoScroll, globalVolume]);
 
     useEffect(() => {
-        if (autoScroll && fullscreenMedia === null) {
-            const intervalId = setInterval(() => {
-                window.scrollBy({ top: scrollSpeed, behavior: 'smooth' });
-            }, 1);
-            return () => clearInterval(intervalId);
+        if (autoScroll && fullscreenMedia === null && !loading) {
+            // Use CSS scroll-behavior for smooth scrolling
+            document.documentElement.style.scrollBehavior = 'auto';
+            
+            // Calculate scroll distance based on viewport height
+            const scrollDistance = Math.max(1, scrollSpeed * 1);
+            
+            const smoothScroll = () => {
+                // Get current scroll position
+                const currentScroll = window.pageYOffset;
+                const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+                
+                // Check if we've reached the bottom
+                if (currentScroll >= maxScroll - 10) {
+                    // Reached bottom, you could implement wrap-around or stop here
+                    return;
+                }
+                
+                // Use smooth scrollTo instead of scrollBy
+                window.scrollTo({
+                    top: currentScroll + scrollDistance,
+                    behavior: 'auto'
+                });
+                
+                scrollAnimation.current = requestAnimationFrame(smoothScroll);
+            };
+            
+            // Start with a small delay to prevent immediate scrolling
+            const timeoutId = setTimeout(() => {
+                scrollAnimation.current = requestAnimationFrame(smoothScroll);
+            }, 100);
+            
+            return () => {
+                clearTimeout(timeoutId);
+                if (scrollAnimation.current) {
+                    cancelAnimationFrame(scrollAnimation.current);
+                }
+                // Reset scroll behavior
+                document.documentElement.style.scrollBehavior = '';
+            };
         }
-    }, [autoScroll, fullscreenMedia, scrollSpeed]);
+    }, [autoScroll, fullscreenMedia, scrollSpeed, loading]);
 
     useEffect(() => {
         setRandomSeed(Date.now());
@@ -923,125 +987,6 @@ const VideoList = () => {
         }
     };
 
-    const checkPasswordRequirements = (password) => {
-        setPasswordRequirements({
-            length: password.length >= 12,
-            uppercase: /[A-Z]/.test(password),
-            lowercase: /[a-z]/.test(password),
-            number: /\d/.test(password),
-            special: /[@$!%*?&]/.test(password)
-        });
-    };
-
-    const handleLogin = async (e) => {
-        e.preventDefault();
-        setLoginError('');
-        
-        try {
-            const response = await fetch(`${API_URL}/api/login`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                ...fetchConfig,
-                body: JSON.stringify({ username, password }),
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.message || 'Login failed');
-            }
-
-            setIsLoggedIn(true);
-            setShowLogin(false);
-            showNotification('Login successful', 'success');
-            setUsername('');
-            setPassword('');
-            
-            // Load saved filter preference after login
-            const savedFilter = getFilterFromCookie();
-            setFilter(savedFilter || 'default'); 
-            
-            // Reset page and fetch media after successful login
-            setCurrentPage(1);
-            setMediaUrls([]);
-            
-            // Update socket authentication status after successful login
-            if (socket) {
-                socket.emit('authenticate', { username });
-            }
-            
-            await fetchMedia(1, initialMediaPerPage);
-            
-        } catch (error) {
-            setLoginError(error.message);
-            showNotification(error.message, 'error');
-        }
-    };
-
-    const handleRegister = async (e) => {
-        e.preventDefault();
-        setLoginError('');
-
-        try {
-            const response = await fetch(`${API_URL}/api/register`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.message || 'Registration failed');
-            }
-
-            showNotification('Registration successful! Please log in.', 'success');
-            setIsRegistering(false);
-            setUsername('');
-            setPassword('');
-        } catch (error) {
-            setLoginError(error.message);
-            showNotification(error.message, 'error');
-        }
-    };
-
-    const handleLogout = async () => {
-        try {
-            if (!isLoggedIn) {
-                setShowLogin(true);
-                return;
-            }
-            
-            await fetch(`${API_URL}/api/logout`, {
-                method: 'POST',
-                ...fetchConfig,
-            });
-            
-            // Update state first
-            setIsLoggedIn(false);
-            setFilter('random'); // Don't trigger extra render cycle with handleFilterChange
-            showNotification('Logged out successfully', 'success');
-            
-            // Close profile menu
-            setShowProfileMenu(false);
-            
-            // Instead of fetching from API, just set to default links for non-logged in users
-            if (defaultLinks && defaultLinks.length > 0) {
-                const links = defaultLinks.map(item => [item.postLink || '', item.videoLinks]);
-                const shuffledLinks = shuffleArray([...links]);
-                setMediaUrls(shuffledLinks.slice(0, initialMediaPerPage));
-            } else {
-                setMediaUrls([]);
-            }
-            
-            // Reset page
-            setCurrentPage(1);
-            
-        } catch (error) {
-            showNotification('Logout failed', 'error');
-        }
-    };
-
     // Add this function to handle saving filter preference
     const saveFilterPreference = (filterValue) => {
         document.cookie = `preferred_filter=${filterValue}; max-age=31536000; path=/`; // Expires in 1 year
@@ -1059,7 +1004,7 @@ const VideoList = () => {
 
     const getScrollSpeedFromCookie = () => {
         const match = document.cookie.match(/preferred_scroll_speed=([^;]+)/);
-        return match ? parseInt(match[1], 20) : 3;
+        return match ? parseFloat(match[1]) : 1;
     };
 
     const saveVolumePreference = (volume) => {
@@ -1121,90 +1066,29 @@ const VideoList = () => {
         // Don't call fetchMedia here to prevent recursion in useEffect dependencies
     };
 
-    const checkLoginStatus = async () => {
-        try {
-            // Detect development environment by checking the URL
-            const isDevelopment = window.location.hostname === 'localhost' || 
-                                 window.location.hostname === '127.0.0.1';
-            
-            // Add dev=true query parameter for dev mode auto-login
-            const authUrl = isDevelopment ? 
-                `${API_URL}/api/verify-auth?dev=true` : 
-                `${API_URL}/api/verify-auth`;
-            
-            const response = await fetch(authUrl, {
-                ...fetchConfig,
-                cache: 'no-cache'
-            });
-
-            if (response.ok) {
-                const userData = await response.json();
-                setIsLoggedIn(true);
-                setUsername(userData.username || '');
-                
-                // Show a notification when auto-logged in through dev mode
-                if (isDevelopment && userData.devMode) {
-                    showNotification('Auto-logged in as admin in development mode', 'success');
-                }
-                
-                // Get user preferences after confirming login
-                const savedFilter = getFilterFromCookie();
-                setFilter(savedFilter || 'default');
-                
-                // If socket exists, authenticate with the confirmed username
-                if (socket) {
-                    socket.emit('authenticate', { username: userData.username });
-                }
-            } else {
-                setIsLoggedIn(false);
-                setFilter('random'); // Default for non-logged users
-            }
-
-            // Load preferences from cookies regardless of login status
-            setScrollSpeed(getScrollSpeedFromCookie());
-            setShowDefaultLinks(getShowDefaultLinksFromCookie());
-            setContentFilter(getContentFilterFromCookie());
-            setAutoScroll(getAutoScrollFromCookie());
-            setTagBlacklist(getTagBlacklistFromCookie());
-
-        } catch (error) {
-            console.error('Error checking login status:', error);
-            setIsLoggedIn(false);
-            setFilter('random');
-
-            // Load preferences even on error
-            setScrollSpeed(getScrollSpeedFromCookie());
-            setContentFilter(getContentFilterFromCookie());
-            setAutoScroll(getAutoScrollFromCookie());
-            setTagBlacklist(getTagBlacklistFromCookie());
-
-            console.log('Error during login check, loading local storage content');
-        }
+    const loadPreferences = () => {
+        // Load preferences from cookies
+        setScrollSpeed(getScrollSpeedFromCookie());
+        setShowDefaultLinks(getShowDefaultLinksFromCookie());
+        setContentFilter(getContentFilterFromCookie());
+        setAutoScroll(getAutoScrollFromCookie());
+        setTagBlacklist(getTagBlacklistFromCookie());
+        setFilter(getFilterFromCookie() || 'random');
     };
 
     useEffect(() => {
-        setCurrentPage(1);
-        setMediaUrls([]);
-        fetchMedia(1, initialMediaPerPage);
-    }, [isLoggedIn, filter, fetchMedia]);
-
-    useEffect(() => {
-        const savedScrollSpeed = getScrollSpeedFromCookie();
-        setScrollSpeed(savedScrollSpeed);
-        // Initialize the slider fill on component mount
-        setTimeout(() => updateSliderFill(savedScrollSpeed), 100);
-    }, []);
-
-    useEffect(() => {
-        const savedVolume = getVolumeFromCookie();
-        setGlobalVolume(savedVolume);
-        // Initialize the slider fill on component mount
-        setTimeout(() => updateVolumeSliderFill(savedVolume), 100);
-    }, []);
-
-    useEffect(() => {
+        // Load all saved preferences on component mount
         const savedTagBlacklist = getTagBlacklistFromCookie();
         setTagBlacklist(savedTagBlacklist);
+        
+        const savedShowDefaultLinks = getShowDefaultLinksFromCookie();
+        setShowDefaultLinks(savedShowDefaultLinks);
+        
+        const savedContentFilter = getContentFilterFromCookie();
+        setContentFilter(savedContentFilter);
+        
+        const savedActiveCollection = getActiveCollectionFromCookie();
+        setActiveCollection(savedActiveCollection);
     }, []);
 
     useEffect(() => {
@@ -1215,124 +1099,27 @@ const VideoList = () => {
         });
     }, [globalVolume]);
 
-    useEffect(() => {
-        const savedShowDefaultLinks = getShowDefaultLinksFromCookie();
-        setShowDefaultLinks(savedShowDefaultLinks);
-    }, []);
-
-    useEffect(() => {
-        const savedContentFilter = getContentFilterFromCookie();
-        setContentFilter(savedContentFilter);
-    }, []);
-
-    useEffect(() => {
-        const savedActiveCollection = getActiveCollectionFromCookie();
-        setActiveCollection(savedActiveCollection);
-    }, []);
-
     const handleExport = async () => {
         try {
-            if (isLoggedIn) {
-                // Server-side export for logged-in users remains unchanged
-                const mediaResponse = await fetch(`${API_URL}/api/export-links`, {
-                    ...fetchConfig,
-                    headers: {
-                        ...fetchConfig.headers,
-                        'Accept': 'application/json'
-                    }
-                });
-                
-                if (!mediaResponse.ok) {
-                    throw new Error(`Failed to export media links: ${mediaResponse.statusText}`);
-                }
-                
-                const scrapeResponse = await fetch(`${API_URL}/api/export-scrape-list`, {
-                    ...fetchConfig,
-                    headers: {
-                        ...fetchConfig.headers,
-                        'Accept': 'application/json'
-                    }
-                });
-                
-                if (!scrapeResponse.ok) {
-                    throw new Error(`Failed to export scrape links: ${scrapeResponse.statusText}`);
-                }
-
-                // Parse responses with error handling
-                let mediaData;
-                let scrapeData;
-                
-                try {
-                    mediaData = await mediaResponse.json();
-                    // Accept either array or object with links property
-                    if (!Array.isArray(mediaData) && !mediaData.links) {
-                        mediaData = []; // Default to empty array if no valid data
-                    }
-                    // Convert to array if it's in object format
-                    mediaData = Array.isArray(mediaData) ? mediaData : mediaData.links || [];
-                } catch (error) {
-                    console.error('Media parse error:', error);
-                    mediaData = []; // Default to empty array on parse error
-                }
-
-                try {
-                    scrapeData = await scrapeResponse.json();
-                    // Accept either array or object format
-                    if (typeof scrapeData === 'string') {
-                        scrapeData = [scrapeData]; // Convert single string to array
-                    } else if (!Array.isArray(scrapeData) && typeof scrapeData === 'object') {
-                        scrapeData = scrapeData.urls || Object.values(scrapeData) || []; // Try to extract URLs
-                    } else if (!Array.isArray(scrapeData)) {
-                        scrapeData = []; // Default to empty array if no valid data
-                    }
-                } catch (error) {
-                    console.error('Scrape parse error:', error);
-                    scrapeData = []; // Default to empty array on parse error
-                }
-                
-                // Create zip file with error handling
-                try {
-                    const zip = new JSZip();
-                    zip.file("media-links.json", JSON.stringify(mediaData, null, 2));
-                    zip.file("scrape-links.json", JSON.stringify(scrapeData, null, 2));
-                    
-                    const content = await zip.generateAsync({ type: "blob" });
-                    
-                    // Create download link
-                    const url = window.URL.createObjectURL(content);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = 'KupoNutEX.zip';
-                    document.body.appendChild(a);
-                    a.click();
-                    window.URL.revokeObjectURL(url);
-                    document.body.removeChild(a);
-                    
-                    showNotification('Collection exported successfully', 'success');
-                } catch (error) {
-                    throw new Error('Failed to create zip file: ' + error.message);
-                }
+            // Export the active collection from localStorage
+            const currentCollection = collections.find(c => c.id === activeCollection);
+            const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+            const localData = getFromLocalStorage(storageKey);
+            
+            if (localData && localData.length > 0) {
+                const dataStr = JSON.stringify(localData, null, 2);
+                const dataBlob = new Blob([dataStr], { type: 'application/json' });
+                const url = URL.createObjectURL(dataBlob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `kupo-nuts-${currentCollection.id}-collection.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showNotification(`${currentCollection.name} collection exported successfully`, 'success');
             } else {
-                // For non-logged in users, export only the active collection
-                const currentCollection = collections.find(c => c.id === activeCollection);
-                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-                const localData = getFromLocalStorage(storageKey);
-                
-                if (localData && localData.length > 0) {
-                    const dataStr = JSON.stringify(localData, null, 2);
-                    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-                    const url = URL.createObjectURL(dataBlob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `kupo-nuts-${currentCollection.id}-collection.json`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    showNotification(`${currentCollection.name} collection exported successfully`, 'success');
-                } else {
-                    showNotification(`No items in ${currentCollection.name} collection to export`, 'info');
-                }
+                showNotification(`No items in ${currentCollection.name} collection to export`, 'info');
             }
         } catch (error) {
             console.error('Export error:', error);
@@ -1370,27 +1157,13 @@ const VideoList = () => {
                         throw new Error('No valid media links found in file');
                     }
 
-                    if (isLoggedIn) {
-                        // Server-side import for logged-in users
-                        const response = await fetch(`${API_URL}/api/import-links`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            ...fetchConfig,
-                            body: JSON.stringify(validContent)
-                        });
-
-                        if (!response.ok) throw new Error('Failed to import links');
-                        
-                        showNotification(`Successfully imported ${validContent.length} links`, 'success');
-                    } else {
-                        // Local storage import for non-logged-in users - use active collection
-                        const currentCollection = collections.find(c => c.id === activeCollection);
-                        const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-                        saveToLocalStorage(validContent, storageKey);
-                        showNotification(`Successfully imported ${validContent.length} links to ${currentCollection.name} collection`, 'success');
-                    }
+                    // Import to localStorage using active collection
+                    const currentCollection = collections.find(c => c.id === activeCollection);
+                    const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                    saveToLocalStorage(validContent, storageKey);
+                    showNotification(`Successfully imported ${validContent.length} links to ${currentCollection.name} collection`, 'success');
                     
-                    // Refresh the display in both cases
+                    // Refresh the display
                     setCurrentPage(1);
                     setMediaUrls([]);
                     await fetchMedia(1, initialMediaPerPage);
@@ -1414,36 +1187,7 @@ const VideoList = () => {
             const file = event.target.files[0];
             if (!file) return;
 
-            const reader = new FileReader();
-            reader.onload = async (e) => {
-                try {
-                    const content = JSON.parse(e.target.result);
-                    
-                    const response = await fetch(`${API_URL}/api/import-scrape-list`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        ...fetchConfig,
-                        body: JSON.stringify(content)
-                    });
-
-                    if (!response.ok) {
-                        const error = await response.json();
-                        throw new Error(error.message || 'Failed to import scrape list');
-                    }
-
-                    const result = await response.json();
-                    showNotification(`Successfully imported ${result.total} URLs and started scraping`, 'success');
-                    
-                    // Refresh media after import and scrape
-                    setCurrentPage(1);
-                    setMediaUrls([]);
-                    await fetchMedia(1, initialMediaPerPage);
-                } catch (error) {
-                    console.error('Import error:', error);
-                    showNotification(error.message || 'Invalid file format', 'error');
-                }
-            };
-            reader.readAsText(file);
+            showNotification('Scrape list import requires server functionality', 'info');
         } catch (error) {
             console.error('File reading error:', error);
             showNotification('Failed to read import file', 'error');
@@ -1483,6 +1227,9 @@ const VideoList = () => {
         // Reset to page 1 when changing filters
         setCurrentPage(1);
         setMediaUrls([]);
+        
+        // Scroll to top when filtering or clearing tags
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     // Handle adding tag to current filter
@@ -1502,6 +1249,9 @@ const VideoList = () => {
             // Reset to page 1 when changing filters
             setCurrentPage(1);
             setMediaUrls([]);
+            
+            // Scroll to top when adding tags
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
     };
 
@@ -1600,6 +1350,9 @@ const VideoList = () => {
         // Store the guest ID in localStorage for persistence
         localStorage.setItem('kupoguestid', guestId.current);
         
+        // Load preferences on component mount
+        loadPreferences();
+        
         const setupSocket = () => {
             const newSocket = io(API_URL, {
                 withCredentials: true,
@@ -1613,13 +1366,8 @@ const VideoList = () => {
             
             newSocket.on('connect', () => {
                 console.log('Connected');
-                checkLoginStatus(); // Ensure login status is checked on connection
-                if (isLoggedIn && username) {
-                    newSocket.emit('authenticate', { username });
-                } else {
-                    // Authenticate as a guest
-                    newSocket.emit('authenticate', { isGuest: true, guestId: guestId.current });
-                }
+                // Always authenticate as a guest
+                newSocket.emit('authenticate', { isGuest: true, guestId: guestId.current });
             });
             
             const handleProgressEvent = (data, type) => {
@@ -1706,17 +1454,14 @@ const VideoList = () => {
                                 item.tags || {}
                             ]);
                             
-                            // For non-logged in users, also add to localStorage
-                            if (!isLoggedIn) {
-                                // Get current collection's storage key
-                                const currentCollection = collections.find(c => c.id === activeCollection);
-                                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-                                
-                                data.newItems.forEach(item => {
-                                    // Use the active collection's storage key
-                                    addToLocalStorage(item, storageKey);
-                                });
-                            }
+                            // Add to localStorage
+                            const currentCollection = collections.find(c => c.id === activeCollection);
+                            const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+                            
+                            data.newItems.forEach(item => {
+                                // Use the active collection's storage key
+                                addToLocalStorage(item, storageKey);
+                            });
 
                             return [...prevMediaUrls, ...formattedItems];
                         });
@@ -1737,13 +1482,8 @@ const VideoList = () => {
             });
 
             newSocket.on('reconnect', () => {
-                
-                if (isLoggedIn && username) {
-                    newSocket.emit('authenticate', { username });
-                } else {
-                    newSocket.emit('authenticate', { isGuest: true, guestId: guestId.current });
-                }
-                
+                // Always authenticate as guest on reconnect
+                newSocket.emit('authenticate', { isGuest: true, guestId: guestId.current });
                 showNotification('WebSocket reconnected', 'success');
             });
             
@@ -1755,7 +1495,7 @@ const VideoList = () => {
             return newSocket;
         };
         
-        // Create socket connection regardless of login state
+        // Create socket connection
         const newSocket = setupSocket();
         setSocket(newSocket);
         
@@ -1765,31 +1505,10 @@ const VideoList = () => {
             }
         };
         
-    }, [isLoggedIn, username, API_URL]); // Removed guestId from dependencies
-
-    const updateSliderFill = (value) => {
-        const slider = document.getElementById('scroll-speed');
-        if (slider) {
-            const percentage = ((value - 1) / 9) * 100;
-            slider.style.backgroundSize = `${percentage}% 100%`;
-        }
-    };
-
-    const updateVolumeSliderFill = (value) => {
-        const slider = document.getElementById('volume-control');
-        if (slider) {
-            const percentage = value * 100;
-            slider.style.backgroundSize = `${percentage}% 100%`;
-        }
-    };
+    }, [API_URL]); // Removed login-related dependencies
 
     const handleSettingsOpen = () => {
         setShowSettings(true);
-        // Initialize sliders on settings open
-        setTimeout(() => {
-            updateSliderFill(scrollSpeed);
-            updateVolumeSliderFill(globalVolume);
-        }, 50); // Small timeout to ensure DOM elements are rendered
     };
 
     const handleClearCollection = () => {
@@ -1798,33 +1517,18 @@ const VideoList = () => {
 
     const confirmClearCollection = () => {
         try {
-            if (isLoggedIn) {
-                // Clear from server
-                fetch(`${API_URL}/api/clear-collection`, {
-                    method: 'POST',
-                    ...fetchConfig,
-                }).then(response => {
-                    if (!response.ok) {
-                        throw new Error('Failed to clear collection on server');
-                    }
-                    setMediaUrls([]);
-                    showNotification('Collection cleared successfully', 'success');
-                }).catch(error => {
-                    console.error('Error clearing collection:', error);
-                    showNotification('Failed to clear collection', 'error');
-                });
-            } else {
-                // Clear from localStorage
-                localStorage.removeItem(LOCAL_STORAGE_KEY);
-                setMediaUrls([]);
-                showNotification('Local collection cleared', 'success');
-            }
+            // Clear from localStorage for the active collection
+            const currentCollection = collections.find(c => c.id === activeCollection);
+            const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+            localStorage.removeItem(storageKey);
+            setMediaUrls([]);
+            showNotification(`${currentCollection.name} collection cleared`, 'success');
             setShowConfirmClear(false);
         } catch (error) {
             console.error('Error clearing collection:', error);
             showNotification('Failed to clear collection', 'error');
         } finally {
-            // Reset media URLs to default if not logged in
+            // Reset media URLs to default
             const defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
             setMediaUrls(defaultMediaLinks);
         }
@@ -1870,18 +1574,12 @@ const VideoList = () => {
 
     const handleUnifiedSearch = () => {
         if (searchQuery.trim().toLowerCase().startsWith('http')) {
-            // It's a URL, set scrapeUrl and trigger scraping
-            setScrapeUrl(searchQuery.trim());
+            // It's a URL, trigger scraping
             
             // Handle special cases
-            if (searchQuery.includes('@')) {
-                const listId = searchQuery.trim().replace('@', '');
-                fetchTweetsFromList(listId);
-            } else if (searchQuery.includes('❤️')) {
+            if (searchQuery.includes('❤️')) {
                 scrapeSavedLinks();
             } else {
-                // Regular URL
-                addScrapeUrlToFile(searchQuery.trim());
                 handleScrape(searchQuery.trim()); // Pass URL directly
             }
         } else {
@@ -1922,47 +1620,53 @@ const VideoList = () => {
     }, [fullscreenMedia]);
 
     // Function to setup observers for all video elements
-    const setupVideoObservers = useCallback(() => {
-        // Clean up any existing observers
-        Object.values(videoObservers.current).forEach(observer => {
-            if (observer) observer.disconnect();
-        });
-        
-        // Clear the observers object
-        videoObservers.current = {};
-        
-        // Setup new observers for all video elements
-        Object.entries(mediaRefs.current).forEach(([index, ref]) => {
-            if (ref && ref.tagName === 'VIDEO') {
-                const observer = new IntersectionObserver(
-                    handleVideoVisibilityChange, 
-                    {
-                        root: null, // viewport
-                        threshold: 0.2 // 20% visibility triggers callback
-                    }
-                );
-                
-                observer.observe(ref);
-                videoObservers.current[index] = observer;
-            }
-        });
-    }, [handleVideoVisibilityChange]);
-
-    // Setup video observers when media refs change
-    useEffect(() => {
-        // Small delay to ensure refs are populated
-        const timer = setTimeout(() => {
-            setupVideoObservers();
-        }, 500);
-        
-        return () => {
-            clearTimeout(timer);
-            // Clean up observers on unmount
+        const setupVideoObservers = useCallback(() => {
+            // Skip if currently loading to avoid performance issues
+            if (loading) return;
+            
+            // Clean up any existing observers more efficiently
             Object.values(videoObservers.current).forEach(observer => {
                 if (observer) observer.disconnect();
             });
-        };
-    }, [mediaUrls, setupVideoObservers]);
+            
+            // Clear the observers object
+            videoObservers.current = {};
+            
+            // Setup new observers for all video elements (except fullscreen video)
+            Object.entries(mediaRefs.current).forEach(([index, ref]) => {
+                if (ref && ref.tagName === 'VIDEO' && parseInt(index) !== fullscreenMedia) {
+                    const observer = new IntersectionObserver(
+                        handleVideoVisibilityChange, 
+                        {
+                            root: null, // viewport
+                            threshold: 0.2, // 20% visibility triggers callback
+                            rootMargin: '50px' // Add margin to reduce frequent triggering
+                        }
+                    );
+                    
+                    observer.observe(ref);
+                    videoObservers.current[index] = observer;
+                }
+            });
+        }, [handleVideoVisibilityChange, fullscreenMedia, loading]);
+
+    // Setup video observers when media refs change
+    useEffect(() => {
+        // Only setup observers if not currently loading to avoid interrupting autoscroll
+        if (!loading) {
+            const timer = setTimeout(() => {
+                setupVideoObservers();
+            }, 1000); // Increased delay to let loading settle
+            
+            return () => {
+                clearTimeout(timer);
+                // Clean up observers on unmount
+                Object.values(videoObservers.current).forEach(observer => {
+                    if (observer) observer.disconnect();
+                });
+            };
+        }
+    }, [mediaUrls.length, setupVideoObservers]); // Use length instead of full mediaUrls array
 
     // Refresh video observers after page changes
     useEffect(() => {
@@ -1977,11 +1681,13 @@ const VideoList = () => {
 
     // Refresh video observers when fullscreen changes
     useEffect(() => {
-        const timer = setTimeout(() => {
-            setupVideoObservers();
-        }, 500);
-        
-        return () => clearTimeout(timer);
+        if (!loading) {
+            const timer = setTimeout(() => {
+                setupVideoObservers();
+            }, 500);
+            
+            return () => clearTimeout(timer);
+        }
     }, [fullscreenMedia, setupVideoObservers]);
 
     const getActiveCollectionStorageKey = () => {
@@ -1992,10 +1698,22 @@ const VideoList = () => {
     const handleCollectionSwitch = (collectionId) => {
         if (collectionId === activeCollection) return;
         
+        // Complete reset of all media-related state
         setActiveCollection(collectionId);
         setCurrentPage(1);
         setMediaUrls([]);
+        setLoadedMedia({}); // Reset loaded media state
+        setFullscreenMedia(null); // Close any fullscreen media
+        setTagFilter(null); // Clear any tag filters
+        setSearchQuery(''); // Clear search query
+        setTagSearchQuery(''); // Clear tag search query
         mediaSet.current.clear();
+        
+        // Clear media refs
+        mediaRefs.current = [];
+        
+        // Scroll to top when switching collections
+        window.scrollTo({ top: 0, behavior: 'smooth' });
         
         // Save preference
         document.cookie = `active_collection=${collectionId}; max-age=31536000; path=/`;
@@ -2029,59 +1747,234 @@ const VideoList = () => {
                         <span>Kupo Nuts</span>
                     </div>
                     
-                    <div className="collection-tabs">
-                        {collections.map(collection => (
-                            <button
-                                key={collection.id}
-                                className={`collection-tab ${activeCollection === collection.id ? 'active' : ''}`}
-                                onClick={() => handleCollectionSwitch(collection.id)}
-                                title={`Switch to ${collection.name} collection`}
-                            >
-                                {collection.name}
-                            </button>
-                        ))}
+                    {/* NSFW indicator - only visible when NSFW mode is active */}
+                    {contentFilter === 'nsfw' && (
+                        <button
+                            onClick={() => {
+                                setContentFilter('sfw');
+                                saveContentFilterPreference('sfw');
+                                showNotification('Content filter set to SFW', 'info');
+                            }}
+                            className="nsfw-indicator"
+                            title="Click to switch to SFW mode"
+                            style={{
+                                background: '#ff4757',
+                                color: 'white',
+                                border: 'none',
+                                padding: '8px 12px',
+                                borderRadius: '6px',
+                                fontSize: '16px',
+                                fontWeight: 'bold',
+                                cursor: 'pointer',
+                                marginLeft: '10px',
+                                animation: 'pulse 2s infinite'
+                            }}
+                        >
+                            🔞 NSFW
+                        </button>
+                    )}
+                    
+                    {!isMobile && (
+                        <>
+                            {/* NSFW button hidden - use Konami code ↑↑↓↓←→←→BA to toggle */}
+                            
+                            <div className="collection-tabs">
+                                {collections.map(collection => (
+                                    <button
+                                        key={collection.id}
+                                        className={`collection-tab ${activeCollection === collection.id ? 'active' : ''}`}
+                                        onClick={() => handleCollectionSwitch(collection.id)}
+                                        title={`Switch to ${collection.name} collection`}
+                                    >
+                                        {collection.name}
+                                    </button>
+                                ))}
+                            </div>
+                        </>
+                    )}
+                </div>
+                
+                {isMobile ? (
+                    <div className="right-section">
+                        <div className="mobile-search-and-menu">
+                            <div className="mobile-search-container">
+                                <input
+                                    type="text"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && handleUnifiedSearch()}
+                                    placeholder="Search or URL..."
+                                    className="search-input"
+                                />
+                                <button
+                                    onClick={handleUnifiedSearch}
+                                    className="search-button"
+                                >
+                                    <i className={`fas ${searchQuery.trim().toLowerCase().startsWith('http') ? 'fa-download' : 'fa-search'}`}></i>
+                                </button>
+                            </div>
+                            
+                            {/* NSFW indicator for mobile - only visible when NSFW mode is active */}
+                            {contentFilter === 'nsfw' && (
+                                <button
+                                    onClick={() => {
+                                        setContentFilter('sfw');
+                                        saveContentFilterPreference('sfw');
+                                        showNotification('Content filter set to SFW', 'info');
+                                    }}
+                                    className="nsfw-indicator mobile-nsfw"
+                                    title="Click to switch to SFW mode"
+                                    style={{
+                                        background: '#ff4757',
+                                        color: 'white',
+                                        border: 'none',
+                                        padding: '6px 10px',
+                                        borderRadius: '5px',
+                                        fontSize: '14px',
+                                        fontWeight: 'bold',
+                                        cursor: 'pointer',
+                                        marginLeft: '5px',
+                                        marginRight: '5px',
+                                        animation: 'pulse 2s infinite'
+                                    }}
+                                >
+                                    🔞
+                                </button>
+                            )}
+                            
+                            <div className="mobile-menu-container">
+                                <button 
+                                    className="mobile-menu-button"
+                                    onClick={() => setShowMobileMenu(!showMobileMenu)}
+                                    aria-label="Open menu"
+                                >
+                                    <i className="fas fa-bars"></i>
+                                </button>
+                            
+                            {showMobileMenu && (
+                                <div className="mobile-dropdown-menu">
+                                    {/* Content Filter hidden - use Konami code ↑↑↓↓←→←→BA to toggle */}
+                                    
+                                    <div className="mobile-menu-section">
+                                        <div className="mobile-menu-header">Collections</div>
+                                        {collections.map(collection => (
+                                            <button
+                                                key={collection.id}
+                                                className={`mobile-menu-item collection-item ${activeCollection === collection.id ? 'active' : ''}`}
+                                                onClick={() => {
+                                                    handleCollectionSwitch(collection.id);
+                                                    setShowMobileMenu(false);
+                                                }}
+                                            >
+                                                <i className="fas fa-folder"></i>
+                                                {collection.name}
+                                                {activeCollection === collection.id && <i className="fas fa-check"></i>}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    
+                                    <div className="mobile-menu-section">
+                                        <div className="mobile-menu-header">Actions</div>
+                                        <button 
+                                            className="mobile-menu-item" 
+                                            onClick={() => {
+                                                handleExport();
+                                                setShowMobileMenu(false);
+                                            }}
+                                        >
+                                            <i className="fas fa-download"></i>
+                                            Export Collection
+                                        </button>
+                                        <button 
+                                            className="mobile-menu-item" 
+                                            onClick={() => {
+                                                document.getElementById('top-import-file-input').click();
+                                                setShowMobileMenu(false);
+                                            }}
+                                        >
+                                            <i className="fas fa-upload"></i>
+                                            Import Collection
+                                        </button>
+                                        <button 
+                                            className="mobile-menu-item clear-item" 
+                                            onClick={() => {
+                                                handleClearCollection();
+                                                setShowMobileMenu(false);
+                                            }}
+                                        >
+                                            <i className="fas fa-trash"></i>
+                                            Clear Collection
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            <input
+                                id="top-import-file-input"
+                                type="file"
+                                accept=".json"
+                                onChange={handleImport}
+                                style={{ display: 'none' }}
+                            />
+                        </div>
                     </div>
-                </div>
-                
-                <button
-                    onClick={() => {
-                        const newFilter = contentFilter === 'sfw' ? 'nsfw' : 'sfw';
-                        setContentFilter(newFilter);
-                        saveContentFilterPreference(newFilter);
-                    }}
-                    className={`content-filter-button ${contentFilter}`}
-                    aria-label="Toggle content filter"
-                    title={`Content filter: ${contentFilter.toUpperCase()}`}
-                >
-                    {contentFilter === 'sfw' ? 'SFW' : 'NSFW'}
-                </button>
-                
-                <div className="search-container">
-                    <input
-                        type="text"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleUnifiedSearch()}
-                        placeholder="Enter tag to search or URL to scrape..."
-                        className="search-input"
-                    />
-                    <button
-                        onClick={handleUnifiedSearch}
-                        className="search-button"
-                    >
-                        <i className={`fas ${searchQuery.trim().toLowerCase().startsWith('http') ? 'fa-download' : 'fa-search'}`}></i>
-                    </button>
-                </div>
+                    </div>
+                ) : (
+                    <>
+                        <div className="search-container">
+                            <input
+                                type="text"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleUnifiedSearch()}
+                                placeholder="Enter tag to search or URL to scrape..."
+                                className="search-input"
+                            />
+                            <button
+                                onClick={handleUnifiedSearch}
+                                className="search-button"
+                            >
+                                <i className={`fas ${searchQuery.trim().toLowerCase().startsWith('http') ? 'fa-download' : 'fa-search'}`}></i>
+                            </button>
+                        </div>
 
-                <div className="right-section">
-                    <button
-                        onClick={() => setShowProfileMenu(!showProfileMenu)}
-                        className={`profile-button ${isLoggedIn ? 'logged-in' : ''}`}
-                        aria-label="Profile"
-                    >
-                        <i className={`fas ${isLoggedIn ? 'fa-user-check' : 'fa-user'}`}></i>
-                    </button>
-                </div>
+                        <div className="right-section">
+                            <div className="collection-management">
+                                <button 
+                                    className="collection-mgmt-btn export-btn" 
+                                    onClick={handleExport}
+                                    title="Export Collection"
+                                >
+                                    <i className="fas fa-download"></i>
+                                    <span>Export</span>
+                                </button>
+                                <button 
+                                    className="collection-mgmt-btn import-btn" 
+                                    onClick={() => document.getElementById('top-import-file-input').click()}
+                                    title="Import Collection"
+                                >
+                                    <i className="fas fa-upload"></i>
+                                    <span>Import</span>
+                                </button>
+                                <input
+                                    id="top-import-file-input"
+                                    type="file"
+                                    accept=".json"
+                                    onChange={handleImport}
+                                    style={{ display: 'none' }}
+                                />
+                                <button 
+                                    className="collection-mgmt-btn clear-btn" 
+                                    onClick={handleClearCollection}
+                                    title="Clear Collection"
+                                >
+                                    <i className="fas fa-trash"></i>
+                                    <span>Clear</span>
+                                </button>
+                            </div>
+                        </div>
+                    </>
+                )}
             </div>
             
             {tagFilter && fullscreenMedia === null && (
@@ -2089,7 +1982,11 @@ const VideoList = () => {
                     <span>Filtering by: {tagFilter}</span>
                     <button 
                         className="clear-button" 
-                        onClick={() => setTagFilter(null)}
+                        onClick={() => {
+                            setTagFilter(null);
+                            // Scroll to top when clearing filter
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
                         aria-label="Clear filter"
                     >
                         <i className="fas fa-times"></i>
@@ -2166,10 +2063,23 @@ const VideoList = () => {
                                             ref={el => mediaRefs.current[index] = el}
                                             src={firstVideoLink}
                                             controls
-                                            autoPlay
                                             muted={fullscreenMedia !== index}
                                             volume={globalVolume}
                                             loop
+                                            
+                                            onClick={fullscreenMedia === index ? (e) => {
+                                            e.stopPropagation();
+                                            e.preventDefault();
+                                            
+                                            const video = mediaRefs.current[index];
+                                            if (video && video.tagName === 'VIDEO') {
+                                                if (video.paused) {
+                                                    video.play().catch(err => console.log('Play prevented:', err));
+                                                } else {
+                                                    video.pause();
+                                                }
+                                            }
+                                        } : undefined}
                                             onLoadedData={() => {
                                                 handleMediaLoad(index);
                                                 // Apply global volume on load
@@ -2276,152 +2186,6 @@ const VideoList = () => {
                     >
                         <i className="fas fa-arrow-down"></i>
                     </button>
-                    {showProfileMenu && (
-                        <div className="profile-menu">
-                            <div className="profile-menu-header">
-                                <h3>Profile Menu</h3>
-                                <button onClick={() => setShowProfileMenu(false)}>
-                                    <i className="fas fa-times"></i>
-                                </button>
-                            </div>
-                            <div className="profile-menu-content">
-                                {isLoggedIn ? (
-                                    <>
-                                        <button className="profile-menu-button" onClick={handleExport}>
-                                            <i className="fas fa-download"></i>
-                                            Export Collection
-                                        </button>
-                                        <label className="profile-menu-button">
-                                            <i className="fas fa-upload"></i>
-                                            Import Collection
-                                            <input
-                                                type="file"
-                                                accept=".json"
-                                                onChange={handleImport}
-                                                style={{ display: 'none' }}
-                                            />
-                                        </label>
-                                        <label className="profile-menu-button">
-                                            <i className="fas fa-list"></i>
-                                            Import Scrape List
-                                            <input
-                                                type="file"
-                                                accept=".json"
-                                                onChange={handleImportScrapeList}
-                                                style={{ display: 'none' }}
-                                            />
-                                        </label>
-                                        <div className="profile-menu-divider"></div>
-                                        <button className="profile-menu-button danger" onClick={handleClearCollection}>
-                                            <i className="fas fa-ban"></i>
-                                            Clear Collection
-                                        </button>
-                                        <button className="profile-menu-button danger" onClick={handleLogout}>
-                                            <i className="fas fa-sign-out-alt"></i>
-                                            Logout
-                                        </button>
-                                    </>
-                                ) : (
-                                    <>
-                                        <button className="profile-menu-button" onClick={() => {
-                                            setShowLogin(true);
-                                            setShowProfileMenu(false);
-                                        }}>
-                                            <i className="fas fa-sign-in-alt"></i>
-                                            Login
-                                        </button>
-                                        <button className="profile-menu-button" onClick={() => {
-                                            setShowLogin(true);
-                                            setIsRegistering(true);
-                                            setShowProfileMenu(false);
-                                        }}>
-                                            <i className="fas fa-user-plus"></i>
-                                            Register
-                                        </button>
-                                        <div className="profile-menu-divider"></div>
-                                        <button className="profile-menu-button" onClick={() => {
-                                            // For non-logged in users, directly export from localStorage
-                                            try {
-                                                // Use the active collection instead of the default
-                                                const currentCollection = collections.find(c => c.id === activeCollection);
-                                                const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-                                                const localData = getFromLocalStorage(storageKey);
-                                                
-                                                if (localData && localData.length > 0) {
-                                                    const dataStr = JSON.stringify(localData, null, 2);
-                                                    const dataBlob = new Blob([dataStr], { type: 'application/json' });
-                                                    const url = URL.createObjectURL(dataBlob);
-                                                    const a = document.createElement('a');
-                                                    a.href = url;
-                                                    a.download = `kupo-nuts-${currentCollection.id}-collection.json`;
-                                                    document.body.appendChild(a);
-                                                    a.click();
-                                                    document.body.removeChild(a);
-                                                    URL.revokeObjectURL(url);
-                                                    showNotification(`${currentCollection.name} collection exported successfully`, 'success');
-                                                } else {
-                                                    showNotification(`No items in ${currentCollection.name} collection to export`, 'info');
-                                                }
-                                            } catch (error) {
-                                                showNotification('Failed to export local collection', 'error');
-                                            }
-                                        }}>
-                                            <i className="fas fa-download"></i>
-                                            Export Local Collection
-                                        </button>
-                                        <label className="profile-menu-button">
-                                            <i className="fas fa-upload"></i>
-                                            Import Collection
-                                            <input
-                                                type="file"
-                                                accept=".json"
-                                                onChange={(event) => {
-                                                    try {
-                                                        const file = event.target.files[0];
-                                                        if (!file) return;
-                                                        
-                                                        const reader = new FileReader();
-                                                        reader.onload = (e) => {
-                                                            try {
-                                                                const json = JSON.parse(e.target.result);
-                                                                if (Array.isArray(json)) {
-                                                                    // Use the active collection's storage key, not the default
-                                                                    const currentCollection = collections.find(c => c.id === activeCollection);
-                                                                    const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-                                                                    
-                                                                    // Save to the active collection
-                                                                    saveToLocalStorage(json, storageKey);
-                                                                    
-                                                                    // Update the UI
-                                                                    setMediaUrls(json.map(item => [item.postLink || '', item.videoLinks]));
-                                                                    
-                                                                    // Show a notification with the collection name
-                                                                    showNotification(`Successfully imported ${json.length} links to ${currentCollection.name} collection`, 'success');
-                                                                } else {
-                                                                    showNotification('Invalid file format', 'error');
-                                                                }
-                                                            } catch (error) {
-                                                                showNotification('Failed to parse import file', 'error');
-                                                            }
-                                                        };
-                                                        reader.readAsText(file);
-                                                    } catch (error) {
-                                                        showNotification('Failed to read import file', 'error');
-                                                    }
-                                                    event.target.value = '';
-                                                }}
-                                                style={{ display: 'none' }}
-                                            />
-                                        </label>
-                                        <button className="profile-menu-button danger" onClick={handleClearCollection}>
-                                            <i className="fas fa-ban"></i>
-                                            Clear Local Collection
-                                        </button>
-                                    </>
-                                )}
-                            </div>
-                        </div>
-                    )}
                 </div>
                 {showSettings && (
                     <div className="settings-dialog">
@@ -2433,101 +2197,12 @@ const VideoList = () => {
                                 </button>
                             </div>
                             <div className="settings-body">
-                                {/* Content filter moved to top bar, removed from here */}
-                                
-                                {isLoggedIn && (
-                                    <div className="settings-item">
-                                        <label>Include Demo Content:</label>
-                                        <div className="default-links-toggle settings-toggle">
-                                            <button 
-                                                className={`content-filter-option ${showDefaultLinks ? 'active' : ''}`}
-                                                onClick={() => {
-                                                    const newValue = true;
-                                                    setShowDefaultLinks(newValue);
-                                                    saveShowDefaultLinksPreference(newValue);
-                                                    setCurrentPage(1);
-                                                    setMediaUrls([]);
-                                                    fetchMedia(1, initialMediaPerPage);
-                                                }}
-                                            >
-                                                Show
-                                            </button>
-                                            <button 
-                                                className={`content-filter-option ${!showDefaultLinks ? 'active' : ''}`}
-                                                onClick={() => {
-                                                    const newValue = false;
-                                                    setShowDefaultLinks(newValue);
-                                                    saveShowDefaultLinksPreference(newValue);
-                                                    setCurrentPage(1);
-                                                    setMediaUrls([]);
-                                                    fetchMedia(1, initialMediaPerPage);
-                                                }}
-                                            >
-                                                Hide
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-                                
+                                {/* 1. Tag Blacklist */}
                                 <div className="settings-item">
-                                    <label htmlFor="filter">Sort by:</label>
-                                    <select 
-                                        id="filter" 
-                                        value={filter} 
-                                        onChange={(e) => {
-                                            handleFilterChange(e.target.value);
-                                        }}
-                                    >
-                                        <option value="Default">Default</option>
-                                        <option value="Newest">Newest</option>
-                                        <option value="Random">Random</option>
-                                        <option value="Oldest">Oldest</option>
-                                    </select>
-                                </div>
-                                
-                                <div className="settings-item">
-                                    <label htmlFor="scroll-speed">Auto-Scroll Speed: {scrollSpeed}px/tick</label>
-                                    <input
-                                        id="scroll-speed"
-                                        type="range"
-                                        min="1"
-                                        max="10"
-                                        value={scrollSpeed}
-                                        onChange={(e) => {
-                                            const newSpeed = parseInt(e.target.value, 10);
-                                            setScrollSpeed(newSpeed);
-                                            saveScrollSpeedPreference(newSpeed);
-                                            updateSliderFill(newSpeed);
-                                        }}
-                                        className="scroll-speed-slider"
-                                    />
-                                    <div className="speed-range-labels">
-                                        <span>Slow</span>
-                                        <span>Fast</span>
-                                    </div>
-                                </div>
-
-                                <div className="settings-item">
-                                    <label htmlFor="volume-control">Volume: {Math.round(globalVolume * 100)}%</label>
-                                    <input
-                                        id="volume-control"
-                                        type="range"
-                                        min="0"
-                                        max="1"
-                                        step="0.01"
-                                        value={globalVolume}
-                                        onChange={(e) => {
-                                            const newVolume = parseFloat(e.target.value);
-                                            setGlobalVolume(newVolume);
-                                            saveVolumePreference(newVolume);
-                                            updateVolumeSliderFill(newVolume);
-                                        }}
-                                        className="volume-slider"
-                                    />
-                                </div>
-
-                                <div className="settings-item">
-                                    <label htmlFor="tag-blacklist">Tag Blacklist (comma-separated):</label>
+                                    <label htmlFor="tag-blacklist">
+                                        <i className="fas fa-ban"></i>
+                                        Tag Blacklist (comma-separated)
+                                    </label>
                                     <div className="blacklist-controls">
                                         <input
                                             type="text"
@@ -2541,112 +2216,139 @@ const VideoList = () => {
                                             onClick={handleDeleteBlacklisted}
                                             title="Delete all media containing blacklisted tags"
                                         >
-                                            <i className="fas fa-trash-alt"></i> Delete All
+                                            <i className="fas fa-trash-alt"></i>
+                                            Delete All
                                         </button>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                    </div>
-                )}
-                {showLogin && (
-                    <div className="login-dialog">
-                        <div className="login-content">
-                            <div className="login-header">
-                                <h2>{isRegistering ? 'Create Account' : 'Login'}</h2>
-                                <button onClick={() => setShowLogin(false)}>
-                                    <i className="fas fa-times"></i>
-                                </button>
-                            </div>
-                            {loginError && <div className="login-error">{loginError}</div>}
-                            <form className="login-form" onSubmit={isRegistering ? handleRegister : handleLogin}>
-                                <input
-                                    type="text"
-                                    placeholder="Username"
-                                    value={username}
-                                    onChange={(e) => setUsername(e.target.value)}
-                                    required
-                                />
-                                <input
-                                    type="password"
-                                    placeholder="Password"
-                                    value={password}
-                                    onChange={(e) => {
-                                        setPassword(e.target.value);
-                                        if (isRegistering) {
-                                            checkPasswordRequirements(e.target.value);
-                                        }
-                                    }}
-                                    required
-                                />
-                                {isRegistering && (
-                                    <div className="password-requirements">
-                                        <p className={passwordRequirements.length ? 'met' : ''}>
-                                            ✓ At least 12 characters
-                                        </p>
-                                        <p className={passwordRequirements.uppercase ? 'met' : ''}>
-                                            ✓ One uppercase letter
-                                        </p>
-                                        <p className={passwordRequirements.lowercase ? 'met' : ''}>
-                                            ✓ One lowercase letter
-                                        </p>
-                                        <p className={passwordRequirements.number ? 'met' : ''}>
-                                            ✓ One number
-                                        </p>
-                                        <p className={passwordRequirements.special ? 'met' : ''}>
-                                            ✓ One special character (@$!%*?&)
-                                        </p>
-                                    </div>
-                                )}
-                                <button type="submit">
-                                    {isRegistering ? 'Create Account' : 'Login'}
-                                </button>
-                            </form>
-                            <div className="login-options">
-                                <button onClick={() => {
-                                    setIsRegistering(!isRegistering);
-                                    setLoginError('');
-                                }}>
-                                    {isRegistering 
-                                        ? 'Already have an account? Login' 
-                                        : 'Need an account? Register'}
-                                </button>
-                            </div>
-                            {isLoggedIn && (
-                                <div className="profile-actions">
-                                    <button onClick={handleExport} className="export-button">
-                                        <i className="fas fa-download"></i> Export Links
-                                    </button>
-                                    <label className="import-button">
-                                        <i className="fas fa-upload"></i> Import Links
-                                        <input
-                                            type="file"
-                                            accept=".json"
-                                            onChange={handleImport}
-                                            style={{ display: 'none' }}
-                                        />
+
+                                {/* 3. Include Demo Content */}
+                                <div className="settings-item">
+                                    <label>
+                                        <i className="fas fa-eye"></i>
+                                        Include Demo Content
                                     </label>
+                                    <div className="default-links-toggle settings-toggle">
+                                        <button 
+                                            className={`content-filter-option ${showDefaultLinks ? 'active' : ''}`}
+                                            onClick={() => {
+                                                const newValue = true;
+                                                setShowDefaultLinks(newValue);
+                                                saveShowDefaultLinksPreference(newValue);
+                                                setCurrentPage(1);
+                                                setMediaUrls([]);
+                                                fetchMedia(1, initialMediaPerPage);
+                                            }}
+                                        >
+                                            Show
+                                        </button>
+                                        <button 
+                                            className={`content-filter-option ${!showDefaultLinks ? 'active' : ''}`}
+                                            onClick={() => {
+                                                const newValue = false;
+                                                setShowDefaultLinks(newValue);
+                                                saveShowDefaultLinksPreference(newValue);
+                                                setCurrentPage(1);
+                                                setMediaUrls([]);
+                                                fetchMedia(1, initialMediaPerPage);
+                                            }}
+                                        >
+                                            Hide
+                                        </button>
+                                    </div>
                                 </div>
-                            )}
+
+                                {/* 4. Sort by */}
+                                <div className="settings-item">
+                                    <label htmlFor="filter">
+                                        <i className="fas fa-sort"></i>
+                                        Sort by
+                                    </label>
+                                    <select 
+                                        id="filter" 
+                                        value={filter} 
+                                        onChange={(e) => {
+                                            handleFilterChange(e.target.value);
+                                        }}
+                                    >
+                                        <option value="Default">Default</option>
+                                        <option value="Newest">Newest</option>
+                                        <option value="Random">Random</option>
+                                        <option value="Oldest">Oldest</option>
+                                    </select>
+                                </div>
+
+                                {/* 5. Auto-Scroll Speed */}
+                                <div className="settings-item">
+                                    <label htmlFor="scroll-speed">
+                                        <i className="fas fa-arrow-down"></i>
+                                        Auto-Scroll Speed: {scrollSpeed}px/tick
+                                    </label>
+                                    <input
+                                        id="scroll-speed"
+                                        type="range"
+                                        min="0.2"
+                                        max="2"
+                                        step="0.2"
+                                        value={scrollSpeed}
+                                        onChange={(e) => {
+                                            const newSpeed = parseFloat(e.target.value);
+                                            setScrollSpeed(newSpeed);
+                                            saveScrollSpeedPreference(newSpeed);
+                                        }}
+                                        className="scroll-speed-slider"
+                                    />
+                                    <div className="speed-range-labels">
+                                        <span>Very Slow</span>
+                                        <span>Fast</span>
+                                    </div>
+                                </div>
+
+                                {/* 6. Volume */}
+                                <div className="settings-item">
+                                    <label htmlFor="volume-control">
+                                        <i className="fas fa-volume-up"></i>
+                                        Volume: {Math.round(globalVolume * 100)}%
+                                    </label>
+                                    <input
+                                        id="volume-control"
+                                        type="range"
+                                        min="0"
+                                        max="1"
+                                        step="0.01"
+                                        value={globalVolume}
+                                        onChange={(e) => {
+                                            const newVolume = parseFloat(e.target.value);
+                                            setGlobalVolume(newVolume);
+                                            saveVolumePreference(newVolume);
+                                        }}
+                                        className="volume-slider"
+                                    />
+                                    <div className="volume-range-labels">
+                                        <span>0%</span>
+                                        <span>100%</span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}
                 {showConfirmClear && (
-                    <div className="login-dialog">
-                        <div className="login-content">
-                            <div className="login-header">
-                                <h2>Confirm Clear</h2>
-                                <button onClick={cancelClearCollection}>
-                                    <i className="fas fa-times"></i>
-                                </button>
+                    <div className="confirm-dialog">
+                        <div className="confirm-content">
+                            <div className="confirm-header">
+                                <h2>Confirm Clear Collection</h2>
                             </div>
-                            <p>Are you sure you want to clear your collection? This action cannot be undone.</p>
-                            <div className="login-options">
-                                <button onClick={confirmClearCollection} className="profile-menu-button danger">
-                                    Yes, Clear Collection
-                                </button>
+                            <div className="confirm-body">
+                                <p>Are you sure you want to clear your <strong>{collections.find(c => c.id === activeCollection)?.name}</strong> collection?</p>
+                                <p>This action cannot be undone and will remove all saved media.</p>
+                            </div>
+                            <div className="confirm-options">
                                 <button onClick={cancelClearCollection}>
                                     Cancel
+                                </button>
+                                <button onClick={confirmClearCollection}>
+                                    Yes, Clear Collection
                                 </button>
                             </div>
                         </div>

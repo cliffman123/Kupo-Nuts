@@ -86,6 +86,39 @@ const cleanupLoginAttempts = () => {
 // Run cleanup every hour
 setInterval(cleanupLoginAttempts, 60 * 60 * 1000);
 
+// Memory monitoring functions
+const getServerMemoryUsage = () => {
+    const usage = process.memoryUsage();
+    return {
+        rss: usage.rss, // Resident Set Size - total memory allocated
+        heapTotal: usage.heapTotal, // Total heap allocated
+        heapUsed: usage.heapUsed, // Heap actually used
+        external: usage.external, // External memory
+        rssMB: (usage.rss / 1024 / 1024).toFixed(2),
+        heapTotalMB: (usage.heapTotal / 1024 / 1024).toFixed(2),
+        heapUsedMB: (usage.heapUsed / 1024 / 1024).toFixed(2),
+        externalMB: (usage.external / 1024 / 1024).toFixed(2),
+        heapUsagePercent: ((usage.heapUsed / usage.heapTotal) * 100).toFixed(2)
+    };
+};
+
+const isServerMemoryLow = () => {
+    const usage = process.memoryUsage();
+    // Consider memory "low" if heap usage is above 80% or RSS is above 500MB
+    const heapUsagePercent = (usage.heapUsed / usage.heapTotal) * 100;
+    const rssMB = usage.rss / 1024 / 1024;
+    
+    return heapUsagePercent > 80 || rssMB > 500;
+};
+
+const logMemoryUsage = () => {
+    const memory = getServerMemoryUsage();
+    console.log(`Memory Usage - RSS: ${memory.rssMB}MB, Heap: ${memory.heapUsedMB}/${memory.heapTotalMB}MB (${memory.heapUsagePercent}%)`);
+};
+
+// Log memory usage every 5 minutes
+setInterval(logMemoryUsage, 5 * 60 * 1000);
+
 // Helper functions for file paths and user data
 const getDataDir = () => {
     let renderDataDir;
@@ -433,8 +466,50 @@ app.post('/api/scrape', authenticateToken, async (req, res) => {
     try {
         console.log(`Starting scrape for ${isGuest ? `guest ${guestId}` : `user ${username}`} with URL: ${url}`);
 
+        // Check server memory before starting scrape
+        if (isServerMemoryLow()) {
+            const memoryInfo = getServerMemoryUsage();
+            const errorMessage = `Server memory usage is high (${memoryInfo.heapUsedMB}MB/${memoryInfo.heapTotalMB}MB, ${memoryInfo.heapUsagePercent}%). Scraping temporarily disabled.`;
+            console.warn(errorMessage);
+            
+            return res.status(503).json({
+                error: 'Server memory limit reached',
+                message: 'Server memory usage is too high. Please try again later.',
+                memoryUsage: {
+                    heapUsedMB: memoryInfo.heapUsedMB,
+                    heapTotalMB: memoryInfo.heapTotalMB,
+                    heapUsagePercent: memoryInfo.heapUsagePercent
+                }
+            });
+        }
+
         // Create a progress callback that emits WebSocket events
         const progressCallback = (count, message, isComplete = false, newItems = []) => {
+            // Check memory during scraping and warn if getting high
+            if (isServerMemoryLow() && !isComplete) {
+                const memoryInfo = getServerMemoryUsage();
+                console.warn(`High memory usage during scraping: ${memoryInfo.heapUsedMB}MB (${memoryInfo.heapUsagePercent}%)`);
+                
+                // Send memory warning to client
+                const userSockets = Array.from(io.sockets.sockets.values())
+                    .filter(s => {
+                        if (isGuest) {
+                            return s.guestId === guestId;
+                        } else {
+                            return s.username === username;
+                        }
+                    });
+
+                if (userSockets.length > 0) {
+                    userSockets.forEach(socket => {
+                        socket.emit('scrape_memory_warning', {
+                            message: `Server memory usage is high (${memoryInfo.heapUsagePercent}%). Scraping may slow down or stop.`,
+                            memoryUsage: memoryInfo
+                        });
+                    });
+                }
+            }
+            
             const userSockets = Array.from(io.sockets.sockets.values())
                 .filter(s => {
                     if (isGuest) {
@@ -1123,6 +1198,24 @@ app.get('/api/health', (req, res) => {
         timestamp: new Date().toISOString(),
         uptime: process.uptime()
     });
+});
+
+// Endpoint to check server memory status
+app.get('/api/memory-status', (req, res) => {
+    try {
+        const memoryInfo = getServerMemoryUsage();
+        const isLow = isServerMemoryLow();
+        
+        res.json({
+            memory: memoryInfo,
+            isMemoryLow: isLow,
+            status: isLow ? 'warning' : 'ok',
+            message: isLow ? 'Server memory usage is high' : 'Server memory usage is normal'
+        });
+    } catch (error) {
+        console.error('Error getting memory status:', error);
+        res.status(500).json({ error: 'Failed to get memory status' });
+    }
 });
 
 app.get('/', (req, res) => {

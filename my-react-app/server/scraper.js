@@ -24,16 +24,16 @@ const CONFIG = {
   PIXIV_LOGIN_URL: process.env.PIXIV_LOGIN_URL || 'https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2Fen%2F&lang=en&source=pc&view_type=page',
   
   // Credentials - Always use environment variables for sensitive data
-  PIXIV_USERNAME: process.env.PIXIV_USERNAME,
-  PIXIV_PASSWORD: process.env.PIXIV_PASSWORD,
+  PIXIV_USERNAME: process.env.PIXIV_USERNAME || 'cliffman123@gmail.com',
+  PIXIV_PASSWORD: process.env.PIXIV_PASSWORD || '$piralKnights7',
   
   // Scraping settings
-  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '3'), // Number of pages to scrape
+  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '5'), // Number of pages to scrape
   
   // Rate limiting
   RATE_LIMIT: {
     minTime: parseInt(process.env.RATE_LIMIT_MIN_TIME || '500'),
-    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '2'),
+    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '10'),
     retries: parseInt(process.env.RATE_LIMIT_RETRIES || '2')
   }
 };
@@ -54,8 +54,8 @@ const WEBSITE_SELECTORS = {
     nextPage: ['#paginator-next'],
     media: ['body > div#page > div#c-posts > div#a-show > div.post-index > div.content > div#image-and-nav > section#image-container > #image'],
     tag: [
-        '#tag-list > ul.tag-list.artist-tag-list > li > a.tag-list-search > span:nth-child(1)', 
-        '#tag-list > ul.tag-list.copyright-tag-list > li > a.tag-list-search > span:nth-child(1)', 
+        '#tag-list > ul.tag-list.artist-tag-list > li > a.tag-list-search > span:nth-child(1)',
+        '#tag-list > ul.tag-list.copyright-tag-list > li > a.tag-list-search > span:nth-child(1)',
         '#tag-list > ul.tag-list.character-tag-list > li > a.tag-list-search > span:nth-child(1)',
         '#tag-list > ul.tag-list.general-tag-list > li > a.tag-list-search > span:nth-child(1)',
     ],
@@ -159,6 +159,7 @@ const WEBSITE_SELECTORS = {
       'body > div.main_content > div.overview_thumbs > ul > li:nth-child(4) > a'
     ],
     media: [
+      'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-post-page > app-page > app-post-page-content > app-post-image > div > img',
       'video source[type="video/mp4"]',
       'img#image',
       'main video#gelcomVideoPlayer source',
@@ -182,6 +183,15 @@ const isAllowedUrl = (url) => {
     // Create regex pattern to match any of our allowed domains
     const pattern = new RegExp(`(${ALLOWED_DOMAINS.join('|')})`, 'i');
     return pattern.test(url);
+};
+
+// Debounce utility function
+const debounce = (func, delay) => {
+    let timeoutId;
+    return function (...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => func.apply(this, args), delay);
+    };
 };
 
 // Function to monitor and close ad tabs
@@ -220,6 +230,9 @@ const monitorAndCloseAdTabs = async (browser, ignoredPage = null) => {
     }
 };
 
+// Create debounced version of the ad tab monitor function
+const debouncedMonitorAndCloseAdTabs = debounce(monitorAndCloseAdTabs, 2000); // 2 second debounce
+
 // For backward compatibility - create flat array of all next page selectors
 const NEXT_PAGE_SELECTORS = Object.values(WEBSITE_SELECTORS)
   .flatMap(site => site.nextPage);
@@ -247,7 +260,7 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
             
             // Only use different options in development environment
             if (process.env.NODE_ENV !== 'production') {
-                launchOptions.headless = true;
+                launchOptions.headless = false;
                 // Only use Edge in development environment
                 launchOptions.executablePath = CONFIG.EDGE_PATH;
                 
@@ -265,10 +278,10 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
             const context = browser.defaultBrowserContext();
             page = await context.newPage();
             
-            // Setup tab monitor interval - check every 5 seconds for ad tabs
+            // Setup tab monitor interval - check every 3 seconds for ad tabs with debouncing
             tabMonitorInterval = setInterval(() => {
-                monitorAndCloseAdTabs(browser, page);
-            }, 5000);
+                debouncedMonitorAndCloseAdTabs(browser, page);
+            }, 3000);
         }
 
         await page.setBypassCSP(true);
@@ -481,16 +494,6 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
     let totalAdded = 0;  // Add counter
     let pageCount = 0;
     let feedPageUrl = providedLink || CONFIG.FEED_URL;
-    const mediaSelectors = [
-        'body > app-root > app-root-layout-page > div > mat-sidenav-container > mat-sidenav-content > app-post-page > app-page > app-post-page-content > app-post-image > div > img',
-        'video source[type="video/mp4"]',
-        'img#image',
-        'main video#gelcomVideoPlayer source',
-        'picture img',
-        'img[src*=".webp"]',
-        'img',
-        'body > div.main_content.post_section > div.outer_post > div.post_image > div > img'
-    ];
 
     // If not provided, create a Set for faster duplicate checking from existingLinks
     if (!existingLinkSet) {
@@ -505,10 +508,10 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
     try {
         const browser = page.browser();
         
-        // // Setup tab monitor interval - check every 5 seconds
+        // // Setup tab monitor interval - check every 3 seconds with debouncing
         // tabCleanupInterval = setInterval(() => {
-        //     monitorAndCloseAdTabs(browser, page);
-        // }, 5000);
+        //     debouncedMonitorAndCloseAdTabs(browser, page);
+        // }, 3000);
 
         while (pageCount < CONFIG.PAGE_TARGET) {
             //await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
@@ -572,7 +575,6 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
                             page.browser(), 
                             link, 
                             existingLinkSet, 
-                            mediaSelectors, 
                             skipSave ? null : username, // Don't pass username if skipSave is true
                             null, // Don't pass progress callback here 
                             CONFIG.RATE_LIMIT.retries,
@@ -654,19 +656,19 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
 };
 
 // New function with retry capability - updated with skipSave parameter
-const processLinkWithRetry = async (browser, link, existingLinkSet, mediaSelectors, username, progressCallback, retriesLeft = 1, skipSave = false) => {
+const processLinkWithRetry = async (browser, link, existingLinkSet, username, progressCallback, retriesLeft = 1, skipSave = false) => {
     // Check if link already exists for efficiency
     if (existingLinkSet.has(link)) {
         return { linksAdded: 0 };
     }
     
     try {
-        const result = await processLink(browser, link, existingLinkSet, mediaSelectors, username, progressCallback, skipSave);
+        const result = await processLink(browser, link, existingLinkSet, username, progressCallback, skipSave);
         
         // If no media was found and we have retries left, try again with different wait strategy
         if (!result.mediaLink && retriesLeft > 0) {
             console.log(`Retrying link: ${link} (${retriesLeft} retries left)`);
-            return processLinkWithRetry(browser, link, existingLinkSet, mediaSelectors, username, progressCallback, retriesLeft - 1, skipSave);
+            return processLinkWithRetry(browser, link, existingLinkSet, username, progressCallback, retriesLeft - 1, skipSave);
         }
         
         // Make sure to always return the linksAdded count
@@ -680,7 +682,7 @@ const processLinkWithRetry = async (browser, link, existingLinkSet, mediaSelecto
             console.log(`Error on ${link}, retrying (${retriesLeft} retries left): ${error.message}`);
             // Wait a bit before retrying
             await new Promise(resolve => setTimeout(resolve, 1000));
-            return processLinkWithRetry(browser, link, existingLinkSet, mediaSelectors, username, progressCallback, retriesLeft - 1, skipSave);
+            return processLinkWithRetry(browser, link, existingLinkSet, username, progressCallback, retriesLeft - 1, skipSave);
         }
         
         console.error(`Failed to process ${link} after all retries:`, error.message);
@@ -689,7 +691,7 @@ const processLinkWithRetry = async (browser, link, existingLinkSet, mediaSelecto
 };
 
 // Fix the syntax error in the extractMediaData function
-const extractMediaData = async (page, link, mediaSelectors) => {
+const extractMediaData = async (page, link) => {
     // Initialize result object with default values
     const result = {
         mediaUrls: [], // Changed from mediaUrl to mediaUrls array
@@ -731,9 +733,11 @@ const extractMediaData = async (page, link, mediaSelectors) => {
         }
     } else {
         try {
-            // Get site-specific selectors first, then fall back to provided ones
+            // Get site-specific selectors first, only use default if site-specific don't exist
             const siteSelectors = getSiteSelectors(link);
-            const combinedSelectors = [...(siteSelectors.media || []), ...mediaSelectors];
+            const selectorsToUse = (siteSelectors.media && siteSelectors.media.length > 0) 
+                ? siteSelectors.media 
+                : WEBSITE_SELECTORS.default.media || [];
             
             // Extract all media URLs (changed to collect all matches instead of just the first one)
             result.mediaUrls = await page.evaluate((selectors) => {
@@ -753,7 +757,7 @@ const extractMediaData = async (page, link, mediaSelectors) => {
                 
                 // Remove duplicates before returning
                 return [...new Set(urls)];
-            }, combinedSelectors);
+            }, selectorsToUse);
             
             // Extract tags if tag selectors exist for this site
             if (siteSelectors.tag && siteSelectors.tag.length > 0) {
@@ -898,7 +902,7 @@ const processPixivLink = async (browser, link, feedPageUrl, username, progressCa
     }
 };
 
-const processLink = async (browser, link, existingLinkSet, mediaSelectors, username, progressCallback, skipSave = false) => {
+const processLink = async (browser, link, existingLinkSet, username, progressCallback, skipSave = false) => {
     let page = null;
     let tabCleanupInterval;
     
@@ -947,7 +951,7 @@ const processLink = async (browser, link, existingLinkSet, mediaSelectors, usern
                 return document.readyState === 'complete';
             }, { timeout: 60000 });
             
-            extractedData = await extractMediaData(page, link, mediaSelectors);
+            extractedData = await extractMediaData(page, link);
         }
 
         if (extractedData && extractedData.mediaUrls.length > 0) {
@@ -1320,10 +1324,10 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
     try {
         const browser = page.browser();
         
-        // // Set up tab monitor interval
+        // // Set up tab monitor interval with debouncing
         // tabCleanupInterval = setInterval(() => {
-        //     monitorAndCloseAdTabs(browser, page);
-        // }, 5000);
+        //     debouncedMonitorAndCloseAdTabs(browser, page);
+        // }, 3000);
 
         while (pageCount < CONFIG.PAGE_TARGET) {
             await page.goto(feedPageUrl, { waitUntil: 'networkidle2' });
