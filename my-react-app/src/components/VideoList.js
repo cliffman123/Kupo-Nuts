@@ -842,7 +842,7 @@ const VideoList = () => {
             document.documentElement.style.scrollBehavior = 'auto';
             
             // Calculate scroll distance based on viewport height
-            const scrollDistance = Math.max(1, scrollSpeed * 0.5);
+            const scrollDistance = Math.max(1, scrollSpeed * 1);
             
             const smoothScroll = () => {
                 // Get current scroll position
@@ -1005,7 +1005,7 @@ const VideoList = () => {
 
     const getScrollSpeedFromCookie = () => {
         const match = document.cookie.match(/preferred_scroll_speed=([^;]+)/);
-        return match ? parseInt(match[1], 5) : 1;
+        return match ? parseFloat(match[1]) : 1;
     };
 
     const saveVolumePreference = (volume) => {
@@ -1228,6 +1228,9 @@ const VideoList = () => {
         // Reset to page 1 when changing filters
         setCurrentPage(1);
         setMediaUrls([]);
+        
+        // Scroll to top when filtering or clearing tags
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
     // Handle adding tag to current filter
@@ -1247,6 +1250,9 @@ const VideoList = () => {
             // Reset to page 1 when changing filters
             setCurrentPage(1);
             setMediaUrls([]);
+            
+            // Scroll to top when adding tags
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
     };
 
@@ -1977,7 +1983,11 @@ const VideoList = () => {
                     <span>Filtering by: {tagFilter}</span>
                     <button 
                         className="clear-button" 
-                        onClick={() => setTagFilter(null)}
+                        onClick={() => {
+                            setTagFilter(null);
+                            // Scroll to top when clearing filter
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }}
                         aria-label="Clear filter"
                     >
                         <i className="fas fa-times"></i>
@@ -2278,18 +2288,19 @@ const VideoList = () => {
                                     <input
                                         id="scroll-speed"
                                         type="range"
-                                        min="1"
-                                        max="5"
+                                        min="0.2"
+                                        max="2"
+                                        step="0.2"
                                         value={scrollSpeed}
                                         onChange={(e) => {
-                                            const newSpeed = parseInt(e.target.value, 5);
+                                            const newSpeed = parseFloat(e.target.value);
                                             setScrollSpeed(newSpeed);
                                             saveScrollSpeedPreference(newSpeed);
                                         }}
                                         className="scroll-speed-slider"
                                     />
                                     <div className="speed-range-labels">
-                                        <span>Slow</span>
+                                        <span>Very Slow</span>
                                         <span>Fast</span>
                                     </div>
                                 </div>
