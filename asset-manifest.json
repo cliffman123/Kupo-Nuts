@@ -1,10 +1,10 @@
 {
   "files": {
     "main.css": "/Kupo-Nuts/static/css/main.d44622f6.css",
-    "main.js": "/Kupo-Nuts/static/js/main.33784b12.js",
-    "static/css/415.48bf2977.chunk.css": "/Kupo-Nuts/static/css/415.48bf2977.chunk.css",
-    "static/js/415.7cb88953.chunk.js": "/Kupo-Nuts/static/js/415.7cb88953.chunk.js",
-    "static/js/334.6b189503.chunk.js": "/Kupo-Nuts/static/js/334.6b189503.chunk.js",
+    "main.js": "/Kupo-Nuts/static/js/main.677f275e.js",
+    "static/css/415.efa02c02.chunk.css": "/Kupo-Nuts/static/css/415.efa02c02.chunk.css",
+    "static/js/415.b5b1b1be.chunk.js": "/Kupo-Nuts/static/js/415.b5b1b1be.chunk.js",
+    "static/js/836.fc2c35d6.chunk.js": "/Kupo-Nuts/static/js/836.fc2c35d6.chunk.js",
     "static/media/fa-solid-900.ttf": "/Kupo-Nuts/static/media/fa-solid-900.2582b0e4bcf85eceead0.ttf",
     "static/media/fa-brands-400.ttf": "/Kupo-Nuts/static/media/fa-brands-400.1815e00441357e01619e.ttf",
     "static/media/fa-solid-900.woff2": "/Kupo-Nuts/static/media/fa-solid-900.2463b90d9a316e4e5294.woff2",
@@ -15,13 +15,13 @@
     "static/media/fa-v4compatibility.woff2": "/Kupo-Nuts/static/media/fa-v4compatibility.ea8f94e1d22e0d35ccd4.woff2",
     "index.html": "/Kupo-Nuts/index.html",
     "main.d44622f6.css.map": "/Kupo-Nuts/static/css/main.d44622f6.css.map",
-    "main.33784b12.js.map": "/Kupo-Nuts/static/js/main.33784b12.js.map",
-    "415.48bf2977.chunk.css.map": "/Kupo-Nuts/static/css/415.48bf2977.chunk.css.map",
-    "415.7cb88953.chunk.js.map": "/Kupo-Nuts/static/js/415.7cb88953.chunk.js.map",
-    "334.6b189503.chunk.js.map": "/Kupo-Nuts/static/js/334.6b189503.chunk.js.map"
+    "main.677f275e.js.map": "/Kupo-Nuts/static/js/main.677f275e.js.map",
+    "415.efa02c02.chunk.css.map": "/Kupo-Nuts/static/css/415.efa02c02.chunk.css.map",
+    "415.b5b1b1be.chunk.js.map": "/Kupo-Nuts/static/js/415.b5b1b1be.chunk.js.map",
+    "836.fc2c35d6.chunk.js.map": "/Kupo-Nuts/static/js/836.fc2c35d6.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.d44622f6.css",
-    "static/js/main.33784b12.js"
+    "static/js/main.677f275e.js"
   ]
 }
