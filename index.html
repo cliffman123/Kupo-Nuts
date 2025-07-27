@@ -1,15 +1,35 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Kupo Nuts Gallery</title>
-    <script>
-        // Redirect to the React app
-        window.location.href = './my-react-app/build/index.html';
-    </script>
+    <meta http-equiv="refresh" content="0; url=./my-react-app/build/index.html">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 50px;
+            background-color: #f5f5f5;
+        }
+        .loading {
+            color: #666;
+            font-size: 18px;
+        }
+        .link {
+            color: #007bff;
+            text-decoration: none;
+        }
+        .link:hover {
+            text-decoration: underline;
+        }
+    </style>
 </head>
 <body>
-    <p>Redirecting to Kupo Nuts Gallery...</p>
-    <p>If you're not redirected, <a href="./my-react-app/build/index.html">click here</a>.</p>
+    <div class="loading">
+        <h1>Kupo Nuts Gallery</h1>
+        <p>Redirecting to the application...</p>
+        <p>If you are not redirected automatically, <a href="./my-react-app/build/index.html" class="link">click here</a>.</p>
+    </div>
 </body>
-</html>
+</html> 
