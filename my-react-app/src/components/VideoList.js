@@ -1053,7 +1053,7 @@ const VideoList = () => {
         // Don't call fetchMedia here to prevent recursion in useEffect dependencies
     };
 
-    const loadPreferences = () => {
+    const loadPreferences = useCallback(() => {
         // Load preferences from cookies
         setScrollSpeed(getScrollSpeedFromCookie());
         setShowDefaultLinks(getShowDefaultLinksFromCookie());
@@ -1061,7 +1061,7 @@ const VideoList = () => {
         setAutoScroll(getAutoScrollFromCookie());
         setTagBlacklist(getTagBlacklistFromCookie());
         setFilter(getFilterFromCookie() || 'random');
-    };
+    }, []);
 
     useEffect(() => {
         // Load all saved preferences on component mount
