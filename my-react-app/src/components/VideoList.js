@@ -82,11 +82,9 @@ const VideoList = () => {
     const [tagBlacklist, setTagBlacklist] = useState('');
     const [scrollSpeed, setScrollSpeed] = useState(3); // Default scroll speed
     const [tagSearchQuery, setTagSearchQuery] = useState('');
-    
     // Konami Code state for hidden NSFW toggle
     const [konamiSequence, setKonamiSequence] = useState([]);
-    const konamiCode = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA'];
-    let defaultMediaLinks = [];
+    const konamiCode = useMemo(() => ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA'], []);
 
     const initialMediaPerPage = 8;
     const mediaPerPage = 16;
@@ -699,12 +697,12 @@ const VideoList = () => {
     }, []);
 
     // Debounced function to handle page increment
-    const debouncedPageIncrement = useCallback(
-        debounce(() => {
+    const debouncedPageIncrement = useCallback(() => {
+        const timeoutId = setTimeout(() => {
             setCurrentPage(prevPage => prevPage + 1);
-        }, 300), // 300ms debounce delay
-        [debounce]
-    );
+        }, 300);
+        return () => clearTimeout(timeoutId);
+    }, []);
 
     const lastMediaElementRef = useCallback(node => {
         if (!node) return;
@@ -797,7 +795,7 @@ const VideoList = () => {
             document.removeEventListener('keydown', handleKeyPress);
             document.body.style.overflow = 'auto';
         };
-    }, [fullscreenMedia, handleKeyPress]);
+    }, [fullscreenMedia, handleKeyPress, handleClickOutside]);
 
     useEffect(() => {
         if (autoScroll && fullscreenMedia !== null) {
@@ -916,10 +914,8 @@ const VideoList = () => {
             return;
         }
         
-       
-        
         prevScrollY.current = currentScrollY;
-    });
+    }, []);
 
     useEffect(() => {
         let scrollTimeout;
@@ -1009,11 +1005,6 @@ const VideoList = () => {
 
     const saveVolumePreference = (volume) => {
         document.cookie = `preferred_volume=${volume}; max-age=31536000; path=/`;
-    };
-
-    const getVolumeFromCookie = () => {
-        const match = document.cookie.match(/preferred_volume=([^;]+)/);
-        return match ? parseFloat(match[1]) : 0.1;
     };
 
     const saveShowDefaultLinksPreference = (show) => {
@@ -1182,19 +1173,7 @@ const VideoList = () => {
         event.target.value = '';
     };
 
-    const handleImportScrapeList = async (event) => {
-        try {
-            const file = event.target.files[0];
-            if (!file) return;
 
-            showNotification('Scrape list import requires server functionality', 'info');
-        } catch (error) {
-            console.error('File reading error:', error);
-            showNotification('Failed to read import file', 'error');
-        }
-        // Reset file input
-        event.target.value = '';
-    };
 
     // Add function to mark media as loaded
     const handleMediaLoad = (index) => {
@@ -1505,7 +1484,7 @@ const VideoList = () => {
             }
         };
         
-    }, [API_URL]); // Removed login-related dependencies
+    }, [API_URL, loadPreferences]); // Added loadPreferences dependency
 
     const handleSettingsOpen = () => {
         setShowSettings(true);
@@ -1688,12 +1667,9 @@ const VideoList = () => {
             
             return () => clearTimeout(timer);
         }
-    }, [fullscreenMedia, setupVideoObservers]);
+    }, [fullscreenMedia, setupVideoObservers, loading]);
 
-    const getActiveCollectionStorageKey = () => {
-        const currentCollection = collections.find(c => c.id === activeCollection);
-        return currentCollection?.storageKey || LOCAL_STORAGE_KEY;
-    };
+
 
     const handleCollectionSwitch = (collectionId) => {
         if (collectionId === activeCollection) return;
