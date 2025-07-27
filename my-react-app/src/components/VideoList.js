@@ -63,7 +63,7 @@ const VideoList = () => {
     const guestId = useRef(localStorage.getItem('kupoguestid') || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
     const [showDefaultLinks, setShowDefaultLinks] = useState(false); // Add state for showing default links
     const [activeCollection, setActiveCollection] = useState('main'); // Add state for active collection
-    const [collections, setCollections] = useState([
+    const [collections] = useState([
         { id: 'main', name: 'Main', storageKey: LOCAL_STORAGE_KEY },
         { id: 'sub', name: 'Sub', storageKey: 'kupoNuts_sub' },
         { id: 'extra', name: 'Extra', storageKey: 'kupoNuts_extra' }
@@ -612,7 +612,7 @@ const VideoList = () => {
         }, 100);
     }, [globalVolume]);
 
-    const handleClickOutside = (event) => {
+    const handleClickOutside = useCallback((event) => {
         if (fullscreenMedia !== null && !mediaRefs.current[fullscreenMedia]?.contains(event.target) && !event.target.closest('.postlink-icon, .close-icon, .remove-icon, .scrape-button, .auto-scroll-button, .similar-icon, .tag, .tags-panel')) {
             handleMediaClose();
         }
@@ -621,7 +621,7 @@ const VideoList = () => {
         if (isMobile && showMobileMenu && !event.target.closest('.mobile-menu-container, .mobile-menu-button, .mobile-dropdown-menu')) {
             setShowMobileMenu(false);
         }
-    };
+    }, [fullscreenMedia, isMobile, showMobileMenu]);
 
     const handleKeyPress = useCallback((e) => {
         if (fullscreenMedia === null) return;
@@ -687,14 +687,7 @@ const VideoList = () => {
         }
     }, [fullscreenMedia, mediaUrls.length, scrollToMedia, globalVolume]);
 
-    // Debounce function to limit how often intersection triggers
-    const debounce = useCallback((func, delay) => {
-        let timeoutId;
-        return (...args) => {
-            clearTimeout(timeoutId);
-            timeoutId = setTimeout(() => func.apply(null, args), delay);
-        };
-    }, []);
+
 
     // Debounced function to handle page increment
     const debouncedPageIncrement = useCallback(() => {
@@ -1484,7 +1477,7 @@ const VideoList = () => {
             }
         };
         
-    }, [API_URL, loadPreferences]); // Added loadPreferences dependency
+    }, [API_URL, loadPreferences, activeCollection, collections]); // Added missing dependencies
 
     const handleSettingsOpen = () => {
         setShowSettings(true);
