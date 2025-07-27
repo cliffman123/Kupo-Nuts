@@ -58,6 +58,7 @@ const VideoList = () => {
     const [tagFilter, setTagFilter] = useState(null);
     const [contentFilter, setContentFilter] = useState('sfw'); // Default to 'sfw'
     const [globalVolume, setGlobalVolume] = useState(0.1); // Add global volume state with default 10%
+    // eslint-disable-next-line no-unused-vars
     const [socket, setSocket] = useState(null); // Add socket state here
     const [searchQuery, setSearchQuery] = useState(''); // New unified search query
     const guestId = useRef(localStorage.getItem('kupoguestid') || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
@@ -81,8 +82,10 @@ const VideoList = () => {
     const [showConfirmClear, setShowConfirmClear] = useState(false);
     const [tagBlacklist, setTagBlacklist] = useState('');
     const [scrollSpeed, setScrollSpeed] = useState(3); // Default scroll speed
+    // eslint-disable-next-line no-unused-vars
     const [tagSearchQuery, setTagSearchQuery] = useState('');
     // Konami Code state for hidden NSFW toggle
+    // eslint-disable-next-line no-unused-vars
     const [konamiSequence, setKonamiSequence] = useState([]);
     const konamiCode = useMemo(() => ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA'], []);
 
@@ -621,7 +624,7 @@ const VideoList = () => {
         if (isMobile && showMobileMenu && !event.target.closest('.mobile-menu-container, .mobile-menu-button, .mobile-dropdown-menu')) {
             setShowMobileMenu(false);
         }
-    }, [fullscreenMedia, isMobile, showMobileMenu]);
+    }, [fullscreenMedia, isMobile, showMobileMenu, handleMediaClose]);
 
     const handleKeyPress = useCallback((e) => {
         if (fullscreenMedia === null) return;
@@ -1477,7 +1480,7 @@ const VideoList = () => {
             }
         };
         
-    }, [API_URL, loadPreferences, activeCollection, collections]); // Added missing dependencies
+    }, [loadPreferences, activeCollection, collections]); // Removed API_URL dependency
 
     const handleSettingsOpen = () => {
         setShowSettings(true);
@@ -1638,7 +1641,7 @@ const VideoList = () => {
                 });
             };
         }
-    }, [mediaUrls.length, setupVideoObservers]); // Use length instead of full mediaUrls array
+    }, [mediaUrls.length, setupVideoObservers, loading]); // Added loading dependency
 
     // Refresh video observers after page changes
     useEffect(() => {
