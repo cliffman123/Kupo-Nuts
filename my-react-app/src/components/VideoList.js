@@ -158,6 +158,33 @@ const VideoList = () => {
         });
     }, [tagBlacklist]);
 
+    const applyContentFilter = useCallback((media) => {
+        // If content filter is set to NSFW, show all content
+        if (contentFilter === 'nsfw') return media;
+        
+        // If content filter is set to SFW, filter out NSFW content
+        return media.filter(item => {
+            const tags = item[2];
+            
+            if (!tags) return true; // Show content without tags
+            
+            const allTags = [];
+            
+            if (Array.isArray(tags)) {
+                tags.forEach(tag => allTags.push(tag.toLowerCase()));
+            } else {
+                Object.values(tags).forEach(categoryTags => {
+                    if (Array.isArray(categoryTags)) {
+                        categoryTags.forEach(tag => allTags.push(tag.toLowerCase()));
+                    }
+                });
+            }
+            
+            // Filter out content with 'nsfw' tag when in SFW mode
+            return !allTags.some(tag => tag.includes('nsfw'));
+        });
+    }, [contentFilter]);
+
     const fetchMedia = useCallback(async (page, limit) => {
         setLoading(true);
         try {
@@ -192,6 +219,17 @@ const VideoList = () => {
 
             // Apply tag blacklist
             mediaLinks = applyTagBlacklist(mediaLinks);
+
+            // Apply content filter (SFW/NSFW filtering)
+            mediaLinks = applyContentFilter(mediaLinks);
+
+            // Fallback: If show demo content is hidden, SFW mode is on, and no content remains after filtering,
+            // show default links as fallback to ensure user always has something to see
+            if (mediaLinks.length === 0 && !showDefaultLinks && contentFilter === 'sfw' && defaultLinks?.length > 0) {
+                const defaultMediaLinks = defaultLinks.map(item => [item.postLink || '', item.videoLinks, item.tags || {}]);
+                // Apply content filter to default links too (in case some default content is NSFW)
+                mediaLinks = applyContentFilter(defaultMediaLinks);
+            }
 
             // Step 3: Apply sorting based on filter
             const totalAvailableItems = mediaLinks.length;
@@ -284,6 +322,22 @@ const VideoList = () => {
 
                 mediaLinks = applyTagBlacklist(mediaLinks);
                 
+                // Apply content filter (SFW/NSFW filtering)
+                mediaLinks = applyContentFilter(mediaLinks);
+                
+                // Fallback: If show demo content is hidden, SFW mode is on, and no content remains after filtering,
+                // show default links as fallback to ensure user always has something to see
+                if (mediaLinks.length === 0 && !showDefaultLinks && contentFilter === 'sfw' && defaultLinks?.length > 0) {
+                    const defaultMediaLinks = defaultLinks.map(item => [
+                        item.postLink || '', 
+                        item.videoLinks, 
+                        item.tags || {},
+                        { isDefault: true } // Mark as default content
+                    ]);
+                    // Apply content filter to default links too (in case some default content is NSFW)
+                    mediaLinks = applyContentFilter(defaultMediaLinks);
+                }
+                
                 let sortedMediaLinks = [];
 
                 const userItems = mediaLinks.filter(item => item[3]?.isUserContent).reverse();
@@ -328,7 +382,7 @@ const VideoList = () => {
         } finally {
             setLoading(false);
         }
-    }, [filter, shuffleArray, tagFilter, showDefaultLinks, filterMediaByTag, applyTagBlacklist, activeCollection, collections]);
+    }, [filter, shuffleArray, tagFilter, showDefaultLinks, filterMediaByTag, applyTagBlacklist, applyContentFilter, activeCollection, collections, contentFilter]);
 
     const setCookies = () => {
         const cookies = JSON.parse(localStorage.getItem('cookies'));
@@ -387,11 +441,18 @@ const VideoList = () => {
             console.log('Scraping URL:', urlToScrape);
             console.log('Guest user');
             
+            // Convert contentFilter string to numeric value for backend
+            const contentFilterValue = contentFilter === 'sfw' ? 0 : 1;
+            
             const response = await fetch(`${API_URL}/api/scrape`, {
                 method: 'POST',
                 headers: headers,
                 ...fetchConfig,
-                body: JSON.stringify({ url: urlToScrape }),
+                body: JSON.stringify({ 
+                    url: urlToScrape,
+                    contentType: contentFilterValue,
+                    socketId: socket?.id
+                }),
             });
             
             if (!response.ok) {
@@ -410,18 +471,25 @@ const VideoList = () => {
 
     const handleRemove = async (postLink) => {
         try {
-            // Remove from the active collection's localStorage
+            // Get storage key for active collection
             const currentCollection = collections.find(c => c.id === activeCollection);
             const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+            
+            // Remove from localStorage
             const localStorageLinks = getFromLocalStorage(storageKey);
-            saveToLocalStorage(localStorageLinks.filter(item => item.postLink !== postLink), storageKey);
+            const filteredLinks = localStorageLinks.filter(item => item.postLink !== postLink);
+            saveToLocalStorage(filteredLinks, storageKey);
 
-            // Update the local state to remove the entire post
-            setMediaUrls(prevMediaUrls => 
-                prevMediaUrls.filter(media => media[0] !== postLink)
-            );
+            // Update UI state
+            setMediaUrls(prevMediaUrls => prevMediaUrls.filter(media => media[0] !== postLink));
+            
+            // Close fullscreen if this media is currently viewed
+            if (fullscreenMedia !== null && mediaUrls[fullscreenMedia]?.[0] === postLink) {
+                setFullscreenMedia(null);
+            }
 
             showNotification('Media removed successfully', 'success');
+            
         } catch (error) {
             console.error('Failed to remove media:', error);
             showNotification('Failed to remove media', 'error');
@@ -451,11 +519,18 @@ const VideoList = () => {
         };
 
         try {
+            // Convert contentFilter string to numeric value for backend
+            const contentFilterValue = contentFilter === 'sfw' ? 0 : 1;
+            
             const response = await fetch(`${API_URL}/api/similar`, {
                 method: 'POST',
                 headers: headers,
                 ...fetchConfig,
-                body: JSON.stringify({ url: postLink }),
+                body: JSON.stringify({ 
+                    url: postLink,
+                    contentType: contentFilterValue,
+                    socketId: socket?.id
+                }),
             });
 
             if (!response.ok) {
@@ -504,7 +579,8 @@ const VideoList = () => {
                 ...fetchConfig,
                 body: JSON.stringify({ 
                     query: query,
-                    contentType: contentFilterValue
+                    contentType: contentFilterValue,
+                    socketId: socket?.id
                 }),
             });
 
@@ -776,7 +852,7 @@ const VideoList = () => {
         setCurrentPage(1);
         setMediaUrls([]);
         fetchMedia(1, initialMediaPerPage);
-    }, [filter, tagFilter, tagBlacklist, fetchMedia]);
+    }, [filter, tagFilter, tagBlacklist, contentFilter, fetchMedia]);
 
     useEffect(() => {
         fetchMedia(currentPage, mediaPerPage);
@@ -1521,10 +1597,26 @@ const VideoList = () => {
 
     const handleDeleteBlacklisted = () => {
         try {
+            if (!tagBlacklist.trim()) {
+                showNotification('No tags in blacklist to delete', 'info');
+                return;
+            }
+
+            // Get storage key for active collection
+            const currentCollection = collections.find(c => c.id === activeCollection);
+            const storageKey = currentCollection?.storageKey || LOCAL_STORAGE_KEY;
+            
+            // Get current stored media
+            const localStorageLinks = getFromLocalStorage(storageKey);
+            
+            // Create blacklist array
             const blacklist = tagBlacklist.split(',').map(tag => tag.trim().toLowerCase());
-            const filteredMedia = mediaUrls.filter(media => {
-                const tags = media[2];
-                if (!tags) return true;
+            
+            // Filter function to check if media should be kept (not blacklisted)
+            const shouldKeepMedia = (media) => {
+                const tags = media.tags || media[2]; // Handle both storage format and display format
+                if (!tags) return true; // Keep media without tags
+                
                 const allTags = [];
                 if (Array.isArray(tags)) {
                     tags.forEach(tag => allTags.push(tag.toLowerCase()));
@@ -1535,12 +1627,35 @@ const VideoList = () => {
                         }
                     });
                 }
+                
+                // Return false if any blacklisted tag is found (meaning don't keep it)
                 return !blacklist.some(blacklistedTag =>
                     allTags.some(tag => tag.includes(blacklistedTag))
                 );
-            });
-            setMediaUrls(filteredMedia);
-            showNotification('Deleted all media containing blacklisted tags', 'success');
+            };
+            
+            // Filter localStorage data
+            const filteredStorageLinks = localStorageLinks.filter(shouldKeepMedia);
+            
+            // Filter current display data
+            const filteredDisplayMedia = mediaUrls.filter(media => shouldKeepMedia(media));
+            
+            // Calculate how many items were removed
+            const removedCount = localStorageLinks.length - filteredStorageLinks.length;
+            
+            // Save filtered data back to localStorage
+            saveToLocalStorage(filteredStorageLinks, storageKey);
+            
+            // Update UI state
+            setMediaUrls(filteredDisplayMedia);
+            
+            // Close fullscreen if needed
+            if (fullscreenMedia !== null && !filteredDisplayMedia[fullscreenMedia]) {
+                setFullscreenMedia(null);
+            }
+            
+            showNotification(`Deleted ${removedCount} media items containing blacklisted tags`, 'success');
+            
         } catch (error) {
             console.error('Error deleting blacklisted media:', error);
             showNotification('Failed to delete blacklisted media', 'error');

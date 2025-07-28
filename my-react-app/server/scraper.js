@@ -33,7 +33,7 @@ const CONFIG = {
   // Rate limiting
   RATE_LIMIT: {
     minTime: parseInt(process.env.RATE_LIMIT_MIN_TIME || '500'),
-    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '10'),
+    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '2'),
     retries: parseInt(process.env.RATE_LIMIT_RETRIES || '2')
   }
 };
@@ -242,7 +242,7 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
     let browser;
     let totalLinksAdded = 0;  // Add this line to track total links
     let tabMonitorInterval;  // Create interval reference
-    const { skipSave = false } = options; // Add options parameter with skipSave flag
+    const { skipSave = false, contentType = 0 } = options; // Add contentType option with default 0 (SFW)
     
     try {
         const postLinksQueue = [];
@@ -329,7 +329,7 @@ const readExistingLinks = (username = null) => {
                 links = JSON.parse(data);
                 
                 // Ensure all links have categorized tags
-                links = links.map(link => ensureCategorizedTags(link));
+                links = links.map(link => ensureCategorizedTags(link, contentType));
                 
                 linkSet = new Set(links.map(link => link.postLink));
                 console.log(`Read ${linkSet.size} existing links for user ${username}`);
@@ -346,7 +346,7 @@ const readExistingLinks = (username = null) => {
         links = JSON.parse(data);
         
         // Ensure all links have categorized tags
-        links = links.map(link => ensureCategorizedTags(link));
+        links = links.map(link => ensureCategorizedTags(link, contentType));
         
         linkSet = new Set(links.map(link => link.postLink));
     }
@@ -874,8 +874,8 @@ const processPixivLink = async (browser, link, feedPageUrl, username, progressCa
                     const linksAdded = skipSave ? 1 : (feedPageUrl.includes("bookmark_new_illust_r18") || 
                                      feedPageUrl.includes("illustrations") || 
                                      feedPageUrl.includes("artworks")
-                        ? saveMediaLinks([mediaLink], username)
-                        : savePixivLinks([mediaLink], username, feedPageUrl));
+                        ? saveMediaLinks([mediaLink], username, contentType)
+                        : savePixivLinks([mediaLink], username, feedPageUrl, contentType));
                     
                     // Update progress callback to match collectAndScrapeLinks format
                     if (progressCallback) {
@@ -970,7 +970,7 @@ const processLink = async (browser, link, existingLinkSet, username, progressCal
             };
             
             // Only save to disk if we're not in skipSave mode
-            const linksAdded = skipSave ? 1 : saveMediaLinks([mediaLink], username);
+            const linksAdded = skipSave ? 1 : saveMediaLinks([mediaLink], username, contentType);
             
             // Save tags by domain if available and not skipping saves
             if (extractedData.tags && !skipSave) {
@@ -1046,7 +1046,7 @@ const findNextPageSelector = async (page, pageCount, feedPageUrl) => {
 };
 
 // Helper function to ensure tags are in the proper categorized format
-const ensureCategorizedTags = (mediaLink) => {
+const ensureCategorizedTags = (mediaLink, contentType = 0) => {
     if (!mediaLink.tags) {
         mediaLink.tags = {
             author: [],
@@ -1054,35 +1054,48 @@ const ensureCategorizedTags = (mediaLink) => {
             character: [],
             general: []
         };
-        return mediaLink;
-    }
-    
-    // If tags is already an object with categories, make sure all expected categories exist
-    if (typeof mediaLink.tags === 'object' && !Array.isArray(mediaLink.tags)) {
-        const expectedCategories = ['author', 'copyright', 'character', 'general'];
-        expectedCategories.forEach(category => {
-            if (!mediaLink.tags[category]) {
-                mediaLink.tags[category] = [];
+    } else {
+        // If tags is already an object with categories, make sure all expected categories exist
+        if (typeof mediaLink.tags === 'object' && !Array.isArray(mediaLink.tags)) {
+            const expectedCategories = ['author', 'copyright', 'character', 'general'];
+            expectedCategories.forEach(category => {
+                if (!mediaLink.tags[category]) {
+                    mediaLink.tags[category] = [];
+                }
+            });
+        } else {
+            // If tags is a flat array, convert it to categorized format (all in general)
+            if (Array.isArray(mediaLink.tags)) {
+                const oldTags = [...mediaLink.tags];
+                mediaLink.tags = {
+                    author: [],
+                    copyright: [],
+                    character: [],
+                    general: oldTags
+                };
             }
-        });
-        return mediaLink;
+        }
     }
     
-    // If tags is a flat array, convert it to categorized format (all in general)
-    if (Array.isArray(mediaLink.tags)) {
-        const oldTags = [...mediaLink.tags];
-        mediaLink.tags = {
-            author: [],
-            copyright: [],
-            character: [],
-            general: oldTags
-        };
+    // Add NSFW tag if content is scraped in NSFW mode (contentType === 1)
+    if (contentType === 1) {
+        // Check if nsfw tag already exists in any category
+        const hasNsfwTag = Object.values(mediaLink.tags).some(categoryTags => 
+            Array.isArray(categoryTags) && categoryTags.some(tag => 
+                tag.toLowerCase() === 'nsfw'
+            )
+        );
+        
+        // Add nsfw tag to general category if it doesn't exist
+        if (!hasNsfwTag) {
+            mediaLink.tags.general.push('nsfw');
+        }
     }
     
     return mediaLink;
 };
 
-const saveMediaLinks = (mediaLinks, username) => {
+const saveMediaLinks = (mediaLinks, username, contentType = 0) => {
     if (!username) {
         console.error('No username provided for saving media links');
         return 0;
@@ -1116,11 +1129,11 @@ const saveMediaLinks = (mediaLinks, username) => {
             existingLinks = JSON.parse(data);
             
             // Ensure all existing links have categorized tags
-            existingLinks = existingLinks.map(link => ensureCategorizedTags(link));
+            existingLinks = existingLinks.map(link => ensureCategorizedTags(link, contentType));
         }
 
         // Ensure all new links have categorized tags
-        const categorizedMediaLinks = mediaLinks.map(link => ensureCategorizedTags(link));
+        const categorizedMediaLinks = mediaLinks.map(link => ensureCategorizedTags(link, contentType));
 
         // Merge new links with existing ones, avoiding duplicates
         const newLinks = categorizedMediaLinks.filter(newLink => 
@@ -1143,7 +1156,7 @@ const saveMediaLinks = (mediaLinks, username) => {
         // Try to save to an alternative location
         try {
             // Ensure all new links have categorized tags
-            const categorizedMediaLinks = mediaLinks.map(link => ensureCategorizedTags(link));
+            const categorizedMediaLinks = mediaLinks.map(link => ensureCategorizedTags(link, contentType));
             
             const altFilePath = path.resolve(__dirname, '../data/users', username, 'links.json');
             const altDir = path.dirname(altFilePath);
@@ -1160,7 +1173,7 @@ const saveMediaLinks = (mediaLinks, username) => {
     }
 };
 
-const savePixivLinks = (pixivLinks, username, providedLink) => {
+const savePixivLinks = (pixivLinks, username, providedLink, contentType = 0) => {
     if (!username) {
         console.error('No username provided for saving Pixiv links');
         return 0;
@@ -1183,11 +1196,11 @@ const savePixivLinks = (pixivLinks, username, providedLink) => {
         existingLinks = JSON.parse(data);
         
         // Ensure all existing links have categorized tags
-        existingLinks = existingLinks.map(link => ensureCategorizedTags(link));
+        existingLinks = existingLinks.map(link => ensureCategorizedTags(link, contentType));
     }
 
     // Ensure all new pixiv links have categorized tags
-    const categorizedPixivLinks = pixivLinks.map(link => ensureCategorizedTags(link));
+    const categorizedPixivLinks = pixivLinks.map(link => ensureCategorizedTags(link, contentType));
 
     // Merge new links with existing ones, avoiding duplicates
     const newLinks = categorizedPixivLinks.filter(newLink => 
