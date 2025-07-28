@@ -24,8 +24,8 @@ const CONFIG = {
   PIXIV_LOGIN_URL: process.env.PIXIV_LOGIN_URL || 'https://accounts.pixiv.net/login?return_to=https%3A%2F%2Fwww.pixiv.net%2Fen%2F&lang=en&source=pc&view_type=page',
   
   // Credentials - Always use environment variables for sensitive data
-  PIXIV_USERNAME: process.env.PIXIV_USERNAME || 'cliffman123@gmail.com',
-  PIXIV_PASSWORD: process.env.PIXIV_PASSWORD || '$piralKnights7',
+  PIXIV_USERNAME: process.env.PIXIV_USERNAME,
+  PIXIV_PASSWORD: process.env.PIXIV_PASSWORD,
   
   // Scraping settings
   PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '5'), // Number of pages to scrape

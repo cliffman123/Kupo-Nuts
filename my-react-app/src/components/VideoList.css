@@ -189,26 +189,76 @@ video, img {
 .media-wrapper.fullscreen .postlink-icon,
 .media-wrapper.fullscreen .remove-icon,
 .media-wrapper.fullscreen .similar-icon {
-  display: block;
-  position: fixed;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  align-items: center;
-  justify-content: center;
-  background-color: #fff;
-  border: 1px solid #ccc;
-  box-shadow: 0 2px 4px var(--shadow-light);
-  transform: scale(1.5);
-  margin: 10px;
+  display: flex !important;
+  position: fixed !important;
+  width: 40px !important;
+  height: 40px !important;
+  border-radius: 50% !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: 0 2px 4px var(--shadow-light) !important;
+  transform: scale(1.5) !important;
+  z-index: 1010 !important;
+  pointer-events: auto !important;
+  /* Override any parent transform effects */
+  transition: none !important;
 }
 
+/* Specific positioning with !important to override any inherited styles */
+.media-wrapper.fullscreen .close-icon {
+  top: 20px !important;
+  right: 20px !important;
+  left: auto !important;
+  bottom: auto !important;
+}
+
+.media-wrapper.fullscreen .postlink-icon {
+  bottom: 260px !important;
+  right: 20px !important;
+  top: auto !important;
+  left: auto !important;
+}
+
+.media-wrapper.fullscreen .similar-icon {
+  bottom: 320px !important;
+  right: 20px !important;
+  top: auto !important;
+  left: auto !important;
+}
+
+.media-wrapper.fullscreen .remove-icon {
+  bottom: 200px !important;
+  right: 20px !important;
+  top: auto !important;
+  left: auto !important;
+}
+
+/* Override hover effects specifically for fullscreen */
 .media-wrapper.fullscreen .close-icon:hover,
 .media-wrapper.fullscreen .postlink-icon:hover,
 .media-wrapper.fullscreen .remove-icon:hover,
 .media-wrapper.fullscreen .similar-icon:hover {
-  background-color: #f0f0f0;
-  box-shadow: 0 4px 8px var(--shadow-medium);
+  background-color: transparent !important;
+  box-shadow: 0 4px 8px var(--shadow-medium) !important;
+  transform: scale(1.5) !important; /* Keep the same scale, don't let hover change it */
+}
+
+/* Ensure icons stay white and change to blue on hover */
+.media-wrapper.fullscreen .close-icon i,
+.media-wrapper.fullscreen .postlink-icon i,
+.media-wrapper.fullscreen .remove-icon i,
+.media-wrapper.fullscreen .similar-icon i {
+  font-size: 20px !important;
+  color: #fff !important;
+}
+
+.media-wrapper.fullscreen .close-icon:hover i,
+.media-wrapper.fullscreen .postlink-icon:hover i,
+.media-wrapper.fullscreen .remove-icon:hover i,
+.media-wrapper.fullscreen .similar-icon:hover i {
+  color: #319bbb !important;
 }
 
 .media-wrapper.fullscreen .close-icon i,
@@ -216,30 +266,29 @@ video, img {
 .media-wrapper.fullscreen .remove-icon i,
 .media-wrapper.fullscreen .similar-icon i {
   font-size: 20px;
-  color: #333;
+  color: #fff;
 }
 
-.media-wrapper.fullscreen .close-icon,
-.media-wrapper.fullscreen .postlink-icon,
-.media-wrapper.fullscreen .similar-icon {
-  right: 50px;
-}
-
+/* Close button positioned in top-right corner */
 .media-wrapper.fullscreen .close-icon {
-  top: 30px;
+  top: 20px;
+  right: 20px;
 }
 
+/* Action buttons stacked above the overlay buttons (settings/auto-scroll) */
 .media-wrapper.fullscreen .postlink-icon {
-  top: 110px;
+  bottom: 200px; /* Above auto-scroll button */
+  right: 20px;
 }
 
 .media-wrapper.fullscreen .similar-icon {
-  top: 190px;
+  bottom: 260px; /* Above postlink button */
+  right: 20px;
 }
 
 .media-wrapper.fullscreen .remove-icon {
-  top: 30px;
-  left: 320px;
+  bottom: 320px; /* Above similar button */
+  right: 20px;
 }
 
 /* UI overlay buttons */
@@ -261,8 +310,8 @@ video, img {
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #fff;
-  border: 1px solid #ccc;
+  background-color: transparent;
+  border: none;
   box-shadow: 0 2px 4px var(--shadow-light);
   cursor: pointer;
   transition: background-color 0.3s, box-shadow 0.3s;
@@ -271,22 +320,27 @@ video, img {
 
 .settings-button:hover, 
 .auto-scroll-button:hover {
-  background-color: #319bbb;
+  background-color: transparent;
   box-shadow: 0 4px 8px var(--shadow-medium);
+}
+
+.settings-button:hover i, 
+.auto-scroll-button:hover i {
+  color: #319bbb;
 }
 
 .settings-button i, 
 .auto-scroll-button i {
   font-size: 20px;
-  color: #333;
+  color: #fff;
 }
 
 .auto-scroll-button.active {
-  background-color: var(--danger-color);
+  background-color: transparent;
 }
 
 .auto-scroll-button.active i {
-  color: #fff;
+  color: var(--danger-color);
 }
 
 /* Gallery UI Settings Dialog */
@@ -892,7 +946,7 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
   position: fixed;
   left: 20px;
   top: 70px;
-  z-index: 1000;
+  z-index: 9999;
   pointer-events: none;
 }
 
@@ -990,6 +1044,7 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
   box-shadow: 2px 0 10px var(--shadow-medium);
   display: none;
   scrollbar-width: thin;
+  transition: width 0.3s ease, padding 0.3s ease;
 }
 
 .media-wrapper.fullscreen .tags-panel {
@@ -1005,6 +1060,77 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+.tags-header-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tags-minimize-button {
+  background-color: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-light);
+  transition: all 0.3s ease;
+}
+
+.tags-minimize-button:hover {
+  background-color: rgba(0, 191, 165, 0.3);
+  transform: scale(1.1);
+}
+
+.tags-minimize-button i {
+  font-size: 14px;
+  transition: transform 0.3s ease;
+}
+
+.tags-panel.minimized {
+  width: 40px;
+  padding: 10px 8px;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  background: none !important;
+}
+
+.tags-panel.minimized .tags-minimize-button {
+  background-color: transparent;
+}
+
+.tags-panel.minimized .tags-header {
+  margin-bottom: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+  justify-content: center;
+}
+
+.tags-panel.minimized .tags-header-title,
+.tags-panel.minimized .tags-content {
+  display: none;
+}
+
+.tags-panel.minimized .tags-header-controls {
+  flex-direction: column;
+}
+
+.tags-panel.minimized .tags-minimize-button i {
+  transform: rotate(180deg);
+}
+
+.tags-content {
+  transition: opacity 0.3s ease;
+}
+
+.tags-panel.minimized .tags-content {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .tags-header .clear-button {
@@ -1056,8 +1182,15 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
 
 .tags-list {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
+}
+
+.tag-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
 }
 
 .tag-container {
@@ -1072,7 +1205,7 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
   border-radius: 4px;
   background-color: #2a2a2a;
   color: #ffffff;
-  font-size: 12px;
+  font-size: 15px;
   cursor: pointer;
   margin-right: 4px;
   transition: background-color 0.2s;
@@ -1103,17 +1236,16 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
 }
 
 .tag-action {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+  width: 12px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   border: none;
   cursor: pointer;
-  margin-left: 2px;
-  font-size: 10px;
-  opacity: 0.8;
+  font-size: 25px;
+  font-weight: bold;
+  opacity: 0.9;
   transition: all 0.2s;
 }
 
@@ -1123,13 +1255,15 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
 }
 
 .tag-action-plus {
-  background-color: #2ecc71;
-  color: white;
+  background: transparent;
+  color: #2ecc71;
+  border: none;
 }
 
 .tag-action-minus {
-  background-color: #e74c3c;
-  color: white;
+  background: transparent;
+  color: #e74c3c;
+  border: none;
 }
 
 .tag-author {
@@ -1211,7 +1345,7 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
   content: "";
   width: 40px;
   height: 40px;
-  border: 4px solid rgba(255, 255, 255, 0.1);
+  border: 4px solid rgba(0, 191, 165, 0.1);
   border-top-color: var(--primary-color);
   border-radius: 50%;
   animation: spin 1s linear infinite;
@@ -1310,7 +1444,7 @@ body:has(.media-wrapper.fullscreen) .active-filter-indicator {
   border: none;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: var(--text-light);
+  color: var(--text-dark);
   outline: none;
   box-shadow: 0 2px 4px var(--shadow-light);
   font-size: 14px;

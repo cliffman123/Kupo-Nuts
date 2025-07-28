@@ -643,7 +643,7 @@ const VideoList = () => {
             mediaContainer.classList.add('fullscreen-active');
         }
         document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon, .similar-icon, .tag, .tags-panel').forEach(button => {
-            button.style.zIndex = '1002';
+            button.style.zIndex = '1010';
         });
         scrollToMedia(index);
     }, [isClickable, globalVolume, scrollToMedia]);
@@ -681,7 +681,7 @@ const VideoList = () => {
         if (mediaContainer) {
             mediaContainer.classList.remove('fullscreen-active');
         }
-        document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon').forEach(button => {
+        document.querySelectorAll('.postlink-icon, .close-icon, .remove-icon, .similar-icon, .tag, .tags-panel').forEach(button => {
             button.style.zIndex = '';
         });
         
@@ -1308,6 +1308,9 @@ const VideoList = () => {
 
     // Add a component for the tags panel that supports categorized tags
     const TagsPanel = ({ tags }) => {
+        // Minimize by default if mobile
+        const [isMinimized, setIsMinimized] = useState(isMobile);
+        
         // Handle the case where tags is null or empty
         if (!tags) return <div className="tags-panel"><div className="tags-header">No tags available</div></div>;
         
@@ -1346,53 +1349,70 @@ const VideoList = () => {
             }
         };
         
+        const toggleMinimize = () => {
+            setIsMinimized(!isMinimized);
+        };
+        
         return (
-            <div className="tags-panel">
+            <div className={`tags-panel ${isMinimized ? 'minimized' : ''}`}>
                 <div className="tags-header">
-                    Tags
+                    <span className="tags-header-title">Tags</span>
+                    <div className="tags-header-controls">
+                        <button 
+                            className="tags-minimize-button" 
+                            onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                toggleMinimize();
+                            }}
+                            title={isMinimized ? "Expand tags panel" : "Minimize tags panel"}
+                        >
+                            <i className={`fas fa-chevron-${isMinimized ? 'right' : 'left'}`}></i>
+                        </button>
+                    </div>
                 </div>
                 
-                {categories.map(category => {
-                    const categoryTags = categorizedTags[category.key];
-                    if (!categoryTags || categoryTags.length === 0) return null;
-                    
-                    return (
-                        <div key={category.key} className="tag-category">
-                            <h3 className="tag-category-header">{category.label}</h3>
-                            <div className="tags-list">
-                                {categoryTags.map((tag, idx) => (
-                                    <div 
-                                        key={`${category.key}-${idx}`}
-                                        className={`tag-container`}
-                                    >
-                                        <span 
-                                            className={`tag tag-${category.key} ${tagFilter === tag ? 'active' : ''}`}
-                                            onClick={(e) => handleTagClick(tag, e)}
+                <div className="tags-content">
+                    {categories.map(category => {
+                        const categoryTags = categorizedTags[category.key];
+                        if (!categoryTags || categoryTags.length === 0) return null;
+                        
+                        return (
+                            <div key={category.key} className="tag-category">
+                                <h3 className="tag-category-header">{category.label}</h3>
+                                <div className="tags-list">
+                                    {categoryTags.map((tag, idx) => (
+                                        <div 
+                                            key={`${category.key}-${idx}`}
+                                            className={`tag-row`}
                                         >
-                                            {tag}
-                                        </span>
-                                        <div className="tag-actions">
                                             <button 
                                                 className="tag-action tag-action-plus" 
                                                 onClick={(e) => handleAddTagToFilter(tag, e)}
                                                 title="Filter by this tag"
                                             >
-                                                <i className="fas fa-plus"></i>
+                                                +
                                             </button>
                                             <button 
                                                 className="tag-action tag-action-minus" 
                                                 onClick={(e) => addTagToBlacklist(tag, e)}
                                                 title="Add to blacklist"
                                             >
-                                                <i className="fas fa-minus"></i>
+                                                -
                                             </button>
+                                            <span 
+                                                className={`tag tag-${category.key} ${tagFilter === tag ? 'active' : ''}`}
+                                                onClick={(e) => handleTagClick(tag, e)}
+                                            >
+                                                {tag}
+                                            </span>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
-                        </div>
-                    );
-                })}
+                        );
+                    })}
+                </div>
             </div>
         );
     };
