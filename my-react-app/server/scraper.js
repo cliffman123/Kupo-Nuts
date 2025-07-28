@@ -28,7 +28,7 @@ const CONFIG = {
   PIXIV_PASSWORD: process.env.PIXIV_PASSWORD,
   
   // Scraping settings
-  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '3'), // Number of pages to scrape
+  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '1'), // Number of pages to scrape
   
   // Rate limiting
   RATE_LIMIT: {
