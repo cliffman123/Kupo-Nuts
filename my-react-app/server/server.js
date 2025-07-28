@@ -319,7 +319,7 @@ app.post('/api/search-tags', async (req, res) => {
                 const result = await scrapeVideos(url, null, null, (count, message, isComplete, newItems = []) => {
                     const siteProgressMessage = `${siteName}: ${message || `Found ${count} items`}`;
                     progressCallback(totalItemsAdded + count, siteProgressMessage, false, newItems);
-                }, { skipSave: true });
+                }, { skipSave: true, contentType });
                 
                 totalItemsAdded += result.linksAdded || 0;
                 progressCallback(totalItemsAdded, `Completed search on ${siteName}, found ${totalItemsAdded} items so far`);

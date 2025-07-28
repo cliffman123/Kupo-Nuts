@@ -33,7 +33,7 @@ const CONFIG = {
   // Rate limiting
   RATE_LIMIT: {
     minTime: parseInt(process.env.RATE_LIMIT_MIN_TIME || '500'),
-    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '2'),
+    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '10'),
     retries: parseInt(process.env.RATE_LIMIT_RETRIES || '2')
   }
 };
@@ -291,7 +291,7 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
             await loginToPixiv(page, providedLink);
             totalLinksAdded = await collectPixivLinks(page, postLinksQueue, providedLink, username, progressCallback, skipSave);
         } else {
-            totalLinksAdded = await handleProvidedLink(page, providedLink, postLinksQueue, [], username, progressCallback, skipSave);
+            totalLinksAdded = await handleProvidedLink(page, providedLink, postLinksQueue, [], username, progressCallback, { skipSave, contentType });
         }
         
         // Send a final progress update
@@ -314,7 +314,7 @@ const scrapeVideos = async (providedLink = null, page = null, username = null, p
 };
 
 // 2. EFFICIENT DATA STRUCTURES - Use Sets for faster lookups
-const readExistingLinks = (username = null) => {
+const readExistingLinks = (username = null, contentType = 0) => {
     let links = [];
     let linkSet = new Set();
     
@@ -456,7 +456,7 @@ const navigateToFeed = async (page, providedLink) => {
 const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLinks, username, progressCallback, options = {}) => {
     console.log('Provided link:', providedLink);
     let totalAdded = 0;  // Add counter
-    const { skipSave = false } = options;
+    const { skipSave = false, contentType = 0 } = options;
     
     // Initial progress update
     if (progressCallback) {
@@ -464,7 +464,7 @@ const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLi
     }
     
     // Read ALL existing links for this user to avoid duplicates - unless we're not saving (guest mode)
-    const { linkSet: existingLinkSet } = skipSave ? { linkSet: new Set() } : readExistingLinks(username);
+    const { linkSet: existingLinkSet } = skipSave ? { linkSet: new Set() } : readExistingLinks(username, contentType);
 
     await page.goto(providedLink, { waitUntil: 'networkidle2' });
 
@@ -485,12 +485,12 @@ const handleProvidedLink = async (page, providedLink, postLinksQueue, existingLi
         await page.goto(providedLink, { waitUntil: 'networkidle2' });
     }
 
-    totalAdded = await collectAndScrapeLinks(page, postLinksQueue, existingLinks, providedLink, username, progressCallback, existingLinkSet, skipSave);
+    totalAdded = await collectAndScrapeLinks(page, postLinksQueue, existingLinks, providedLink, username, progressCallback, existingLinkSet, skipSave, contentType);
     return totalAdded;  // Return the total
 };
 
 // 1. PARALLEL PROCESSING - Process links in parallel batches
-const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, providedLink = null, username, progressCallback, existingLinkSet = null, skipSave = false) => {
+const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, providedLink = null, username, progressCallback, existingLinkSet = null, skipSave = false, contentType = 0) => {
     let totalAdded = 0;  // Add counter
     let pageCount = 0;
     let feedPageUrl = providedLink || CONFIG.FEED_URL;
@@ -498,7 +498,7 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
     // If not provided, create a Set for faster duplicate checking from existingLinks
     if (!existingLinkSet) {
         // Use the enhanced readExistingLinks function to get ALL existing links
-        const { linkSet } = readExistingLinks(username);
+        const { linkSet } = readExistingLinks(username, contentType);
         existingLinkSet = linkSet;
     }
     
@@ -578,7 +578,8 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
                             skipSave ? null : username, // Don't pass username if skipSave is true
                             null, // Don't pass progress callback here 
                             CONFIG.RATE_LIMIT.retries,
-                            skipSave // Pass skipSave flag
+                            skipSave, // Pass skipSave flag
+                            contentType // Pass contentType
                         );
                     })
                 );
@@ -656,19 +657,19 @@ const collectAndScrapeLinks = async (page, postLinksQueue, existingLinks, provid
 };
 
 // New function with retry capability - updated with skipSave parameter
-const processLinkWithRetry = async (browser, link, existingLinkSet, username, progressCallback, retriesLeft = 1, skipSave = false) => {
+const processLinkWithRetry = async (browser, link, existingLinkSet, username, progressCallback, retriesLeft = 1, skipSave = false, contentType = 0) => {
     // Check if link already exists for efficiency
     if (existingLinkSet.has(link)) {
         return { linksAdded: 0 };
     }
     
     try {
-        const result = await processLink(browser, link, existingLinkSet, username, progressCallback, skipSave);
+        const result = await processLink(browser, link, existingLinkSet, username, progressCallback, skipSave, contentType);
         
         // If no media was found and we have retries left, try again with different wait strategy
         if (!result.mediaLink && retriesLeft > 0) {
             console.log(`Retrying link: ${link} (${retriesLeft} retries left)`);
-            return processLinkWithRetry(browser, link, existingLinkSet, username, progressCallback, retriesLeft - 1, skipSave);
+            return processLinkWithRetry(browser, link, existingLinkSet, username, progressCallback, retriesLeft - 1, skipSave, contentType);
         }
         
         // Make sure to always return the linksAdded count
@@ -682,7 +683,7 @@ const processLinkWithRetry = async (browser, link, existingLinkSet, username, pr
             console.log(`Error on ${link}, retrying (${retriesLeft} retries left): ${error.message}`);
             // Wait a bit before retrying
             await new Promise(resolve => setTimeout(resolve, 1000));
-            return processLinkWithRetry(browser, link, existingLinkSet, username, progressCallback, retriesLeft - 1, skipSave);
+            return processLinkWithRetry(browser, link, existingLinkSet, username, progressCallback, retriesLeft - 1, skipSave, contentType);
         }
         
         console.error(`Failed to process ${link} after all retries:`, error.message);
@@ -791,7 +792,7 @@ const extractMediaData = async (page, link) => {
 };
 
 // Updated processPixivLink function
-const processPixivLink = async (browser, link, feedPageUrl, username, progressCallback, skipSave = false) => {
+const processPixivLink = async (browser, link, feedPageUrl, username, progressCallback, skipSave = false, contentType = 0) => {
     try {
         // Create a new page for this process
         const page = await browser.newPage();
@@ -902,7 +903,7 @@ const processPixivLink = async (browser, link, feedPageUrl, username, progressCa
     }
 };
 
-const processLink = async (browser, link, existingLinkSet, username, progressCallback, skipSave = false) => {
+const processLink = async (browser, link, existingLinkSet, username, progressCallback, skipSave = false, contentType = 0) => {
     let page = null;
     let tabCleanupInterval;
     
@@ -1328,7 +1329,7 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
     }
 
     // Load existing links from links.json to avoid duplicates - Use our enhanced function
-    const { linkSet: existingLinkSet } = skipSave ? { linkSet: new Set() } : readExistingLinks(username);
+    const { linkSet: existingLinkSet } = skipSave ? { linkSet: new Set() } : readExistingLinks(username, 0); // Default to SFW for Pixiv
     console.log(`Loaded ${existingLinkSet.size} existing links for duplicate checking`);
 
     // Setup tab cleanup interval
@@ -1408,7 +1409,8 @@ const collectPixivLinks = async (page, postLinksQueue, providedLink, username, p
                             feedPageUrl, 
                             skipSave ? null : username, 
                             null, // Don't pass progress callback here
-                            skipSave // Pass skipSave flag
+                            skipSave, // Pass skipSave flag
+                            0 // Default to SFW for Pixiv
                         );
                     })
                 );
