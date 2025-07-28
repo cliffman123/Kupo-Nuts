@@ -28,13 +28,13 @@ const CONFIG = {
   PIXIV_PASSWORD: process.env.PIXIV_PASSWORD,
   
   // Scraping settings
-  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '5'), // Number of pages to scrape
+  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '3'), // Number of pages to scrape
   
   // Rate limiting
   RATE_LIMIT: {
     minTime: parseInt(process.env.RATE_LIMIT_MIN_TIME || '500'),
-    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '10'),
-    retries: parseInt(process.env.RATE_LIMIT_RETRIES || '2')
+    maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '2'),
+    retries: parseInt(process.env.RATE_LIMIT_RETRIES || '1')
   }
 };
 
