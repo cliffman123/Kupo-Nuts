@@ -16,7 +16,6 @@ const CONFIG = {
   EDGE_PATH: process.env.EDGE_PATH || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   LINKS_PATH: process.env.LINKS_PATH || path.join(__dirname, '../../build/links.json'),
   DATA_DIR: process.env.DATA_DIR || path.join(__dirname, '../../data'),
-  UBLOCK_PATH: process.env.UBLOCK_PATH || 'C:\\Users\\cliff\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Extensions\\odfafepnkmbhccpbejgmiehpchacaeak\\1.62.0_0',
   COOKIES_PATH: process.env.COOKIES_PATH || path.join(__dirname, './cookies.json'),
   
   // URLs
@@ -28,13 +27,13 @@ const CONFIG = {
   PIXIV_PASSWORD: process.env.PIXIV_PASSWORD,
   
   // Scraping settings
-  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '5'), // Number of pages to scrape
+  PAGE_TARGET: parseInt(process.env.PAGE_TARGET || '2'), // Number of pages to scrape
   
   // Rate limiting
   RATE_LIMIT: {
     minTime: parseInt(process.env.RATE_LIMIT_MIN_TIME || '500'),
     maxConcurrent: parseInt(process.env.RATE_LIMIT_MAX_CONCURRENT || '10'),
-    retries: parseInt(process.env.RATE_LIMIT_RETRIES || '2')
+    retries: parseInt(process.env.RATE_LIMIT_RETRIES || '1')
   }
 };
 

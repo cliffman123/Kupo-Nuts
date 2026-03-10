@@ -4,10 +4,12 @@ const bodyParser = require('body-parser');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const { scrapeVideos } = require('./scraper');
+//const { scrapeVideos } = require('./scraper');
+const { scrapeVideos } = require('./scraperRemake');
 // Add Socket.IO for real-time updates
 const http = require('http');
 const socketIo = require('socket.io');
+const { SocketStateManager, SOCKET_STATES } = require('./socketStateManager');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -28,13 +30,19 @@ const io = socketIo(server, {
         },
         credentials: true,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-        allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'x-guest-id']
+        allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept']
     }
 });
+
+// Create global state manager instance after creating the server
+const stateManager = new SocketStateManager();
 
 // Socket.IO connection handling with cleanup
 io.on('connection', (socket) => {
     console.log(`New WebSocket connection: ${socket.id} (Total: ${io.engine.clientsCount})`);
+    
+    // Initialize socket state
+    stateManager.initializeSocket(socket.id);
     
     // Set a timeout to automatically disconnect idle sockets
     const idleTimeout = setTimeout(() => {
@@ -49,13 +57,30 @@ io.on('connection', (socket) => {
     
     socket.on('disconnect', (reason) => {
         clearTimeout(idleTimeout);
+        
+        // Handle disconnection based on current state
+        const currentState = stateManager.getState(socket.id);
+        
+        if (currentState === SOCKET_STATES.SCRAPING) {
+            console.log(`⚠️  Socket ${socket.id} disconnected during SCRAPING (reason: ${reason})`);
+            console.log(`Stopping active scrape operation...`);
+        }
+        
+        // Remove socket and abort any ongoing operations
+        stateManager.removeSocket(socket.id);
+        
+        const stats = stateManager.getStateStats();
         console.log(`WebSocket disconnected: ${socket.id} (Reason: ${reason}, Remaining: ${io.engine.clientsCount - 1})`);
+        console.log(`📊 Socket State Stats:`, stats);
     });
     
     // Handle socket errors
     socket.on('error', (error) => {
         console.error(`Socket error on ${socket.id}:`, error);
         clearTimeout(idleTimeout);
+        
+        // Transition to DISCONNECTING state
+        stateManager.setDisconnecting(socket.id);
         socket.disconnect(true);
     });
 });
@@ -91,7 +116,7 @@ const createProgressCallback = (socketId, eventName) => {
         const limitedNewItems = newItems ? newItems.slice(0, 50) : [];
         const targetSocket = io.sockets.sockets.get(socketId);
         
-        if (targetSocket) {
+        if (targetSocket && targetSocket.connected) {
             targetSocket.emit(eventName, {
                 count,
                 message: message || `Found ${count} items`,
@@ -148,7 +173,7 @@ const corsOptions = {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization', 'x-guest-id']
+    allowedHeaders: ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
 };
 
 // Apply CORS middleware
@@ -162,17 +187,63 @@ app.post('/api/scrape', async (req, res) => {
     const { url, socketId, contentType } = req.body;
 
     try {
+        if (!socketId) {
+            return res.status(400).json({ message: 'Socket ID is required' });
+        }
+
+        // Verify socket exists
+        if (!stateManager.socketExists(socketId)) {
+            return res.status(400).json({ message: 'Socket not connected' });
+        }
+
         console.log(`Starting scrape for socket ${socketId} with URL: ${url}, contentType: ${contentType}`);
 
+        // Create AbortController for this scrape operation
+        const abortController = new AbortController();
+
+        // Transition socket to SCRAPING state
+        stateManager.setScraping(socketId, abortController, url);
+
         const progressCallback = createProgressCallback(socketId, 'scrape_progress');
-        const result = await scrapeVideos(url, null, null, progressCallback, { skipSave: true, contentType });
+        
+        progressCallback(0, 'Starting scrape...');
+        
+        try {
+            const result = await scrapeVideos(url, (count, message, isComplete, newItems = []) => {
+                // Check if scrape was aborted
+                if (abortController.signal.aborted) {
+                    throw new Error('Scrape operation was cancelled');
+                }
+                
+                const siteProgressMessage = `Scrape: ${message || `Found ${count} items`}`;
+                progressCallback(count, siteProgressMessage, isComplete, newItems);
+            }, { skipSave: true, contentType, signal: abortController.signal });
+            
+            // Only finalize if socket is still in SCRAPING state
+            if (stateManager.getState(socketId) === SOCKET_STATES.SCRAPING) {
+                progressCallback(result.linksAdded, 'Scraping completed successfully', true);
 
-        progressCallback(result.linksAdded, 'Scraping completed successfully', true);
+                // Transition back to CONNECTED state
+                const socketData = stateManager.getSocketData(socketId);
+                if (socketData) {
+                    socketData.state = SOCKET_STATES.CONNECTED;
+                    socketData.scrapeAbortController = null;
+                    socketData.url = null;
+                }
+            }
 
-        res.status(200).json({
-            message: 'Scraping successful - results sent via WebSocket',
-            linksAdded: result.linksAdded,
-        });
+            res.status(200).json({
+                message: 'Scraping successful - results sent via WebSocket',
+                linksAdded: result.linksAdded,
+            });
+        } catch (error) {
+            if (error.message === 'Scrape operation was cancelled') {
+                console.log(`🛑 Scrape for socket ${socketId} was cancelled`);
+                res.status(400).json({ message: 'Scrape operation was cancelled' });
+            } else {
+                throw error;
+            }
+        }
     } catch (error) {
         console.error('Error scraping videos:', error);
         res.status(500).json({ message: 'Scraping failed', error: error.message });
@@ -253,21 +324,68 @@ app.post('/api/similar', async (req, res) => {
     const { url, socketId, contentType } = req.body;
 
     try {
+        if (!socketId) {
+            return res.status(400).json({ message: 'Socket ID is required' });
+        }
+
         if (!url) {
             return res.status(400).json({ message: 'URL is required' });
+        }
+
+        // Verify socket exists
+        if (!stateManager.socketExists(socketId)) {
+            return res.status(400).json({ message: 'Socket not connected' });
         }
         
         console.log(`Similar search request for socket ${socketId}: URL=${url}, contentType=${contentType}`);
         
+        // Create AbortController for this operation
+        const abortController = new AbortController();
+
+        // Transition socket to SCRAPING state
+        stateManager.setScraping(socketId, abortController, url);
+
         const progressCallback = createProgressCallback(socketId, 'similar_progress');
-        const result = await scrapeVideos(url, null, null, progressCallback, { skipSave: true, contentType });
+        
+        progressCallback(0, 'Starting similar content search...');
+        
+        try {
+            const result = await scrapeVideos(url, (count, message, isComplete, newItems = []) => {
+                if (abortController.signal.aborted) {
+                    throw new Error('Similar search was cancelled');
+                }
+                
+                const siteProgressMessage = `Similar search: ${message || `Found ${count} items`}`;
+                progressCallback(count, siteProgressMessage, isComplete, newItems);
+            }, { skipSave: true, contentType, signal: abortController.signal });
+            
+            // Only finalize if socket is still in SCRAPING state
+            if (stateManager.getState(socketId) === SOCKET_STATES.SCRAPING) {
+                progressCallback(result.linksAdded, 
+                    result.linksAdded > 0 ? 'Similar posts found successfully' : 'No similar posts found', 
+                    true);
 
-        progressCallback(result.linksAdded, result.linksAdded > 0 ? 'Similar posts found successfully' : 'No similar posts found', true);
+                // Transition back to CONNECTED state
+                const socketData = stateManager.getSocketData(socketId);
+                if (socketData) {
+                    socketData.state = SOCKET_STATES.CONNECTED;
+                    socketData.scrapeAbortController = null;
+                    socketData.url = null;
+                }
+            }
 
-        res.status(200).json({ 
-            message: result.linksAdded > 0 ? 'Similar posts found successfully - results sent via WebSocket' : 'No similar posts found', 
-            count: result.linksAdded 
-        });
+            res.status(200).json({ 
+                message: result.linksAdded > 0 ? 'Similar posts found successfully - results sent via WebSocket' : 'No similar posts found', 
+                count: result.linksAdded 
+            });
+        } catch (error) {
+            if (error.message === 'Similar search was cancelled') {
+                console.log(`🛑 Similar search for socket ${socketId} was cancelled`);
+                res.status(400).json({ message: 'Similar search was cancelled' });
+            } else {
+                throw error;
+            }
+        }
     } catch (error) {
         console.error('Error finding similar posts:', error);
         res.status(500).json({ 
@@ -282,6 +400,10 @@ app.post('/api/search-tags', async (req, res) => {
     try {
         console.log(`Tag search request for socket ${socketId}: tag="${query}", contentType=${contentType}`);
         
+        if (!socketId) {
+            return res.status(400).json({ message: 'Socket ID is required' });
+        }
+
         if (!query || query.trim() === '') {
             return res.status(400).json({
                 message: 'Search query is required',
@@ -289,62 +411,201 @@ app.post('/api/search-tags', async (req, res) => {
                 media: []
             });
         }
+
+        // Verify socket exists
+        if (!stateManager.socketExists(socketId)) {
+            return res.status(400).json({ message: 'Socket not connected' });
+        }
         
+        // Create AbortController for this tag search operation
+        const abortController = new AbortController();
+
+        // Transition socket to SCRAPING state
+        const searchQuery = query.trim();
+        stateManager.setScraping(socketId, abortController, `tag_search:${searchQuery}`);
+
         // Create progress callback for WebSocket updates
         const progressCallback = createProgressCallback(socketId, 'tag_search_progress');
         
         // Generate search URLs based on content type
         const getSearchUrls = (query, contentType) => {
-            const encodedQuery = encodeURIComponent(query.trim());
-            const hyphenQuery = query.trim().replace(/\s+/g, '-');
+            const encodedQuery = encodeURIComponent(query);
+            const underscoreQuery = query.replace(/\s+/g, '_');
             
             return contentType === 0 
                 ? [`https://safebooru.donmai.us/posts?tags=${encodedQuery}&z=2`]
-                : [`https://kusowanka.com/tag/${hyphenQuery}/`];
+                : [`https://app.rule34.dev/r34/0/-video+days:99999+${underscoreQuery}`];
         };
         
-        const urlsToScrape = getSearchUrls(query, contentType);
+        const urlsToScrape = getSearchUrls(searchQuery, contentType);
         
         console.log(`Using search URLs: ${urlsToScrape.join(', ')}`);
         progressCallback(0, 'Starting tag search across multiple sites...');
         
         let totalItemsAdded = 0;
         
-        for (const [index, url] of urlsToScrape.entries()) {
-            const siteName = new URL(url).hostname;
+        try {
+            for (const [index, url] of urlsToScrape.entries()) {
+                // Check if search was aborted
+                if (abortController.signal.aborted) {
+                    throw new Error('Tag search was cancelled');
+                }
+
+                const siteName = new URL(url).hostname;
+                
+                try {
+                    progressCallback(totalItemsAdded, `Searching site ${index + 1} of ${urlsToScrape.length}: ${siteName}`);
+                    
+                    const result = await scrapeVideos(url, (count, message, isComplete, newItems = []) => {
+                        if (abortController.signal.aborted) {
+                            throw new Error('Tag search was cancelled');
+                        }
+                        
+                        const siteProgressMessage = `${siteName}: ${message || `Found ${count} items`}`;
+                        progressCallback(totalItemsAdded + count, siteProgressMessage, false, newItems);
+                    }, { skipSave: true, contentType, signal: abortController.signal });
+                    
+                    totalItemsAdded += result.linksAdded || 0;
+                    progressCallback(totalItemsAdded, `Completed search on ${siteName}, found ${totalItemsAdded} items so far`);
+                } catch (error) {
+                    if (error.message === 'Tag search was cancelled') {
+                        throw error;
+                    }
+                    console.error(`Error scraping ${siteName}:`, error);
+                }
+            }
             
-            try {
-                progressCallback(totalItemsAdded, `Searching site ${index + 1} of ${urlsToScrape.length}: ${siteName}`);
-                
-                const result = await scrapeVideos(url, null, null, (count, message, isComplete, newItems = []) => {
-                    const siteProgressMessage = `${siteName}: ${message || `Found ${count} items`}`;
-                    progressCallback(totalItemsAdded + count, siteProgressMessage, false, newItems);
-                }, { skipSave: true, contentType });
-                
-                totalItemsAdded += result.linksAdded || 0;
-                progressCallback(totalItemsAdded, `Completed search on ${siteName}, found ${totalItemsAdded} items so far`);
-            } catch (error) {
-                console.error(`Error scraping ${siteName}:`, error);
+            // Only finalize if socket is still in SCRAPING state
+            if (stateManager.getState(socketId) === SOCKET_STATES.SCRAPING) {
+                progressCallback(totalItemsAdded, 
+                    totalItemsAdded > 0 ? 'Tag search completed successfully across all sites' : 'No results found for tag search',
+                    true);
+
+                // Transition back to CONNECTED state
+                const socketData = stateManager.getSocketData(socketId);
+                if (socketData) {
+                    socketData.state = SOCKET_STATES.CONNECTED;
+                    socketData.scrapeAbortController = null;
+                    socketData.url = null;
+                }
+            }
+            
+            res.status(200).json({
+                message: totalItemsAdded > 0 ? 'Tag search completed successfully - results sent via WebSocket' : 'No results found for tag search',
+                count: totalItemsAdded,
+                query: searchQuery,
+                contentType,
+                searchedSites: urlsToScrape.length
+            });
+        } catch (error) {
+            if (error.message === 'Tag search was cancelled') {
+                console.log(`🛑 Tag search for socket ${socketId} was cancelled`);
+                res.status(400).json({ message: 'Tag search was cancelled' });
+            } else {
+                throw error;
             }
         }
-        
-        progressCallback(totalItemsAdded, 
-            totalItemsAdded > 0 ? 'Tag search completed successfully across all sites' : 'No results found for tag search',
-            true);
-        
-        res.status(200).json({
-            message: totalItemsAdded > 0 ? 'Tag search completed successfully - results sent via WebSocket' : 'No results found for tag search',
-            count: totalItemsAdded,
-            query,
-            contentType,
-            searchedSites: urlsToScrape.length
-        });
     } catch (error) {
         console.error('Error during tag search:', error);
         res.status(500).json({
             message: 'Failed to search tags',
             error: error.message
         });
+    }
+});
+
+// API Routes - Batch Import
+app.post('/api/import-scrape-list', async (req, res) => {
+    const { urls, socketId, contentType } = req.body;
+
+    try {
+        if (!socketId) {
+            return res.status(400).json({ message: 'Socket ID is required' });
+        }
+
+        if (!urls || !Array.isArray(urls) || urls.length === 0) {
+            return res.status(400).json({ message: 'Array of URLs is required' });
+        }
+
+        // Verify socket exists
+        if (!stateManager.socketExists(socketId)) {
+            return res.status(400).json({ message: 'Socket not connected' });
+        }
+
+        console.log(`Starting batch scrape for socket ${socketId} with ${urls.length} URLs, contentType: ${contentType}`);
+
+        // Create AbortController for this batch scrape operation
+        const abortController = new AbortController();
+
+        // Transition socket to SCRAPING state
+        stateManager.setScraping(socketId, abortController, `batch_scrape:${urls.length}_urls`);
+
+        const progressCallback = createProgressCallback(socketId, 'batch_scrape_progress');
+        
+        progressCallback(0, `Starting batch scrape of ${urls.length} links...`);
+        
+        try {
+            let totalLinksAdded = 0;
+            
+            for (const [index, url] of urls.entries()) {
+                // Check if batch scrape was aborted
+                if (abortController.signal.aborted) {
+                    throw new Error('Batch scrape operation was cancelled');
+                }
+
+                progressCallback(totalLinksAdded, `Processing ${index + 1} of ${urls.length}: ${url.substring(0, 50)}...`);
+                
+                try {
+                    const result = await scrapeVideos(url, (count, message, isComplete, newItems = []) => {
+                        // Check if operation was aborted
+                        if (abortController.signal.aborted) {
+                            throw new Error('Batch scrape operation was cancelled');
+                        }
+                        
+                        const batchProgressMessage = `[${index + 1}/${urls.length}] ${message || `Found ${count} items`}`;
+                        progressCallback(totalLinksAdded + count, batchProgressMessage, false, newItems);
+                    }, { skipSave: true, contentType, signal: abortController.signal });
+                    
+                    totalLinksAdded += result.linksAdded || 0;
+                    progressCallback(totalLinksAdded, `Completed link ${index + 1}/${urls.length}, total found: ${totalLinksAdded}`);
+                } catch (error) {
+                    if (error.message === 'Batch scrape operation was cancelled') {
+                        throw error;
+                    }
+                    console.error(`Error scraping URL ${index + 1} (${url}):`, error);
+                    progressCallback(totalLinksAdded, `Error on link ${index + 1}, continuing to next...`);
+                }
+            }
+            
+            // Only finalize if socket is still in SCRAPING state
+            if (stateManager.getState(socketId) === SOCKET_STATES.SCRAPING) {
+                progressCallback(totalLinksAdded, `Batch scrape completed successfully, found ${totalLinksAdded} items total`, true);
+
+                // Transition back to CONNECTED state
+                const socketData = stateManager.getSocketData(socketId);
+                if (socketData) {
+                    socketData.state = SOCKET_STATES.CONNECTED;
+                    socketData.scrapeAbortController = null;
+                    socketData.url = null;
+                }
+            }
+
+            res.status(200).json({
+                message: `Batch scraping successful - results sent via WebSocket`,
+                total: totalLinksAdded,
+                urlsProcessed: urls.length
+            });
+        } catch (error) {
+            if (error.message === 'Batch scrape operation was cancelled') {
+                console.log(`🛑 Batch scrape for socket ${socketId} was cancelled`);
+                res.status(400).json({ message: 'Batch scrape operation was cancelled' });
+            } else {
+                throw error;
+            }
+        }
+    } catch (error) {
+        console.error('Error in batch scrape:', error);
+        res.status(500).json({ message: 'Batch scraping failed', error: error.message });
     }
 });
 
@@ -398,6 +659,29 @@ app.get('*', (req, res) => {
     `);
 });
 
+// Add this new endpoint to proxy media through your backend
+app.get('/api/proxy-media', async (req, res) => {
+  const { url } = req.query;
+  
+  if (!url) {
+    return res.status(400).json({ error: 'URL is required' });
+  }
+  
+  try {
+    const protocol = url.startsWith('https') ? https : http;
+    
+    protocol.get(url, (response) => {
+      res.set('Content-Type', response.headers['content-type'] || 'application/octet-stream');
+      res.set('Access-Control-Allow-Origin', '*');
+      response.pipe(res);
+    }).on('error', (err) => {
+      res.status(500).json({ error: err.message });
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Start server - use the HTTP server instance with Socket.IO
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT} with WebSocket support | Data dir: ${getDataDir()}`);
@@ -442,4 +726,20 @@ process.on('uncaughtException', (error) => {
 process.on('unhandledRejection', (reason, promise) => {
     console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
     gracefulShutdown();
+});
+
+// Add a debug endpoint to view socket states (optional but helpful)
+app.get('/api/socket-stats', (req, res) => {
+    const stats = stateManager.getStateStats();
+    const activeSockets = stateManager.getAllActiveSockets().map(s => ({
+        socketId: s.socketId.substring(0, 8) + '...',
+        state: s.state,
+        url: s.url,
+        duration: ((Date.now() - s.startTime) / 1000).toFixed(2) + 's'
+    }));
+    
+    res.status(200).json({
+        stats,
+        activeSockets
+    });
 });

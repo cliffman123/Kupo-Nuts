@@ -1,7 +1,7 @@
 {
   "name": "kupo-nuts-frontend",
   "version": "1.0.0",
-  "homepage": "https://cliffman123.github.io/Kupo-Nuts",
+  "homepage": "./",
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
@@ -9,45 +9,24 @@
     "eject": "react-scripts eject",
     "serve": "serve -s build",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d build",
-    "install-all": "cd .. && npm run install-all"
+    "deploy": "gh-pages -d build"
   },
   "dependencies": {
-    "@craco/craco": "^7.1.0",
     "@fortawesome/fontawesome-free": "^6.7.2",
-    "@jridgewell/sourcemap-codec": "^1.4.15",
-    "assert": "^2.1.0",
-    "browserify-zlib": "^0.2.0",
-    "buffer": "^6.0.3",
-    "crypto-browserify": "^3.12.1",
-    "https-browserify": "^1.0.0",
-    "object-assign": "^4.1.1",
-    "process": "^0.11.10",
+    "@virtuoso.dev/masonry": "^1.3.5",
+    "jszip": "^3.10.1",
+    "masonry-layout": "^4.2.2",
+    "minimasonry": "^1.3.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-masonry-css": "^1.0.16",
     "react-scripts": "5.0.1",
-    "socket.io-client": "^4.8.1",
-    "stream-browserify": "^3.0.0",
-    "stream-http": "^3.2.0",
-    "url": "^0.11.4",
-    "util": "^0.12.5",
-    "vm-browserify": "^1.1.2"
+    "react-smart-masonry": "^2.0.2",
+    "react-virtuoso": "^4.14.1",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
-    "@babel/plugin-transform-class-properties": "^7.23.3",
-    "@babel/plugin-transform-nullish-coalescing-operator": "^7.23.4",
-    "@babel/plugin-transform-numeric-separator": "^7.23.4",
-    "@babel/plugin-transform-optional-chaining": "^7.23.4",
-    "@babel/plugin-transform-private-methods": "^7.23.3",
-    "@babel/plugin-transform-private-property-in-object": "^7.23.4",
-    "@rollup/plugin-terser": "^0.4.4",
-    "babel-plugin-polyfill-corejs2": "^0.4.8",
-    "babel-plugin-polyfill-corejs3": "^0.8.7",
-    "babel-plugin-polyfill-regenerator": "^0.5.5",
-    "eslint": "^8.56.0",
-    "gh-pages": "^6.3.0",
-    "rimraf": "^5.0.5"
+    "gh-pages": "^6.3.0"
   },
   "eslintConfig": {
     "extends": [
